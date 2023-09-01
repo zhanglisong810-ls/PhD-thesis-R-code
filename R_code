@@ -1,0 +1,3790 @@
+
+###########################Chapter 4##############################
+data_1<- read_dta("PIS_2010_.dta")
+data_2<- read_dta("PIS_2011_.dta")
+data_3<- read_dta("PIS_2012_.dta")
+data_4<- read_dta("PIS_2013_.dta")
+data_5<- read_dta("PIS_2014_.dta")
+data_6<- read_dta("PIS_2015_.dta")
+data_7<- read_dta("PIS_2016_.dta")
+data_8<- read_dta("PIS_2017_.dta")
+data_9<- read_dta("PIS_2018_.dta")
+data_10<- read_dta("PIS_2019_.dta")
+mydata_1<- rbind(data_1,data_2,data_3,data_4,data_5,data_6,data_7,data_8,data_9,data_10)
+AIH_LISONG<- read_dta("AIH_lisong.dta")
+charlson_AIH<- read_dta("charlsonAIH_.dta")
+rehosp_AIH<- AIH_LISONG %>% filter(main_condition=='F100'|main_condition=='F1000'|main_condition=='F1001'|main_condition=='F1002'|main_condition=='F1003'|main_condition=='F1004'|main_condition=='F1005'|main_condition=='F1006'|main_condition=='F101')
+death_AIH<- AIH_LISONG%>% filter(!is.na(date_Alcohol_Death_))%>% subset(select=c(1,50)) %>% distinct()
+mydata_1<- mydata_1 %>% filter(prescribertypedescription=="General Practice")
+mydata_patient_3<- subset(mydata_1,select=c("patientid","patgendercode","age_paid_date","ddd", "presclocationcodeanon"   ,"simd2012_sc_decile","simd2016_sc_decile","prescriberprofessionalnoanon","prescdate","pibnfrootdrugdescription")) %>% filter(pibnfrootdrugdescription=="DIAZEPAM"|pibnfrootdrugdescription=="CHLORDIAZEPOXIDE HYDROCHLORIDE") %>%distinct()
+mydata_patient_3$prescdate<- ymd(mydata_patient_3$prescdate)
+first_hospitalization_AIH <- AIH_LISONG %>% filter(!is.na(indexdate_AIH)) %>% mutate(length=discharge_date_-ymd(admission_date))
+hosp_patient_AIH<- first_hospitalization_AIH %>% subset(select=c("patientid","indexdate_AIH","length")) %>% distinct()
+result_3<- inner_join(mydata_patient_3, hosp_patient_AIH,by="patientid") %>% distinct() %>% mutate(time_diff=prescdate- indexdate_AIH)%>% filter(time_diff>0)
+result_3<- result_3%>% group_by(patientid) %>% mutate(order_num=order(prescdate))%>% mutate(cnt=max(order_num))%>%distinct()%>% arrange(patientid,order_num)
+first_365_aih <- result_3%>% filter(time_diff<365)%>% filter(order_num==1)
+outcome_hosp_AIH<- inner_join(first_365_aih, rehosp_AIH, by=c("patientid")) %>% filter(prescdate < ymd(admission_date) ) %>% subset(select=c(1:30)) %>% mutate(timediff_hosp= ymd(admission_date)-prescdate)  
+outcome_hosp_AIH_result<- outcome_hosp_AIH %>% group_by(patientid,prescriberprofessionalnoanon) %>% summarise(min(timediff_hosp))
+colnames(outcome_hosp_AIH_result)[3]<-'timediff_hosp'
+outcome_hosp_AIH_result$rehosp_1<- 1
+outcome_hosp_AIH_result$rehosp<- ifelse(outcome_hosp_AIH_result$timediff_hosp<365,1,0)
+p_time_3<- first_365_aih %>% subset(select=c("prescriberprofessionalnoanon","prescdate"))
+patients<- first_365_aih %>% subset(select=c("patientid","prescriberprofessionalnoanon","prescdate"))
+ppp_aih<- inner_join(p_time_3,mydata_patient_3,by=c("prescriberprofessionalnoanon")) %>% filter(prescdate.x> prescdate.y) %>% distinct() %>% subset(select=c(1,2,7,10,11))
+ppp_aih<- distinct(ppp_aih)
+AIH_LISONG<- read_dta("AIH_lisong.dta")
+charlson_AIH<- read_dta("charlsonAIH_.dta")
+rehosp_AIH<- AIH_LISONG %>% filter(main_condition=='F100'|main_condition=='F1000'|main_condition=='F1001'|main_condition=='F1002'|main_condition=='F1003'|main_condition=='F1004'|main_condition=='F1005'|main_condition=='F1006'|main_condition=='F101')
+death_AIH<- AIH_LISONG%>% filter(!is.na(date_Alcohol_Death_))%>% subset(select=c(1,50)) %>% distinct()
+##contruct the ppp as IV, using prior 1,2,3,4,5...20 prescritpions
+ppp_physician<- function(n,ppp_aih){  
+  colnames(ppp_aih)[4]<- 'prescription_date'
+  ppp_20_aih<- ppp_aih %>% group_by(prescriberprofessionalnoanon) %>% filter(prescription_date>ymd(20100101)) %>% arrange(prescriberprofessionalnoanon,prescription_date) %>% mutate(ord_num=order(desc(as.numeric(prescription_date))))%>% mutate(cnt_prescription=max(ord_num))%>% filter(cnt_prescription>21)%>% mutate(ppp_1=ifelse(pibnfrootdrugdescription=="DIAZEPAM",1,0)) %>% mutate(cnt_1=sum(ppp_1))%>% mutate(ppp_proportion=round(cnt_1/cnt_prescription,4))%>% filter(ord_num<n+1) %>% mutate(ppp=round(sum(ppp_1)/n,4))%>%subset(select=c("prescriberprofessionalnoanon","ppp","ppp_proportion")) %>% distinct()
+  ppp_result_temp_aih<- left_join(first_365_aih,ppp_20_aih,by=c("prescriberprofessionalnoanon"))
+  ppp_result_aih<- left_join(ppp_result_temp_aih,outcome_hosp_AIH_result,by=c("patientid","prescriberprofessionalnoanon")) 
+  ppp_result_aih<- left_join(ppp_result_aih,death_AIH,by=c("patientid"))
+  ppp_result_aih$rehosp[is.na(ppp_result_aih$rehosp)]= 0
+  ppp_result_aih$rehosp_1[is.na(ppp_result_aih$rehosp_1)]= 0
+  ppp_result_aih$death<- ifelse(!is.na(ppp_result_aih$date_Alcohol_Death_),1,0)
+  ppp_result_aih$timediff_hosp[is.na(ppp_result_aih$timediff_hosp)]<-ifelse(ppp_result_aih$death==1&& ppp_result_aih$rehosp_1!=0,ppp_result_aih$date_Alcohol_Death_-ppp_result_aih$prescdate,ymd(20191201)-ppp_result_aih$prescdate)
+  #ppp_result_aih$timediff_hosp[is.na(ppp_result_aih$timediff_hosp)]<-(ymd(20190301)-ppp_result_aih$prescdate)
+  ppp_result_aih<- inner_join(ppp_result_aih,charlson_AIH ,by=c("patientid"))
+  colnames(ppp_result_aih)[2]<-'gender'
+  colnames(ppp_result_aih)[3]<-'age'
+  colnames(ppp_result_aih)[4]<-'dosage'
+  colnames(ppp_result_aih)[8]<-'prescriber'
+  colnames(ppp_result_aih)[10]<-'prescription'
+  ppp_result_aih <- ppp_result_aih %>% mutate(age_1=ifelse(age>46,1,0),charlson10yr=ifelse(charlindex10yr>0,1,0),charlson1yr=ifelse(charlindex1yr>0,1,0))
+  ###ppp_result_aih<-ppp_result_aih %>% inner_join(ppp_result_aih,physician, by=c("prescriberprofessionalnoanon"))
+  ppp_result_aih<- ppp_result_aih%>% mutate(year=year(prescdate),month=month(prescdate))
+  ppp_result_aih<- ppp_result_aih %>% mutate(drug=1)
+  ppp_result_aih$drug[ppp_result_aih$prescription=="DIAZEPAM"]<- 1
+  ppp_result_aih$drug[ppp_result_aih$prescription=="CHLORDIAZEPOXIDE HYDROCHLORIDE"]<- 0 
+  ppp_result_aih$gender<- factor(ppp_result_aih$gender)
+  ppp_result_aih$charlson10yr<- as.numeric(ppp_result_aih$charlindex10yr)
+  ppp_result_aih$charlson1yr<- as.numeric(ppp_result_aih$charlindex1yr)
+  ppp_result_aih$dosage<- as.numeric(ppp_result_aih$dosage)
+  ppp_result_aih$length<- as.numeric(ppp_result_aih$length)
+  
+  ppp_result_aih$year<- as.factor(ppp_result_aih$year)
+  ppp_result_aih$month<- as.factor(ppp_result_aih$month)
+  ##ppp_result_aih$ppp<- factor(ppp_result_aih$ppp)
+  # ppp_result_aih$charlindex10yr<- as.numeric(ppp_result_aih$char)
+  # ppp_result_aih$charlindex1yr<- factor(ppp_result_aih$charlindex1yr)
+  ppp_result_aih$simd2012_sc_decile<- as.factor(ppp_result_aih$simd2012_sc_decile)
+  ppp_result_aih$simd2016_sc_decile<- as.factor(ppp_result_aih$simd2016_sc_decile)
+  ppp_result_aih<- ppp_result_aih%>% mutate(timediff_hosp_death=ifelse(death==1,date_Alcohol_Death_-prescdate,ymd(20191201)-prescdate))
+  cohort$gender<- factor(cohort$gender,levels = c("1","2"),labels = c("Male","Female"))  
+  #t<- ppp_result_aih[,cluster]
+  # names(ppp_result_aih)[names(ppp_result_aih)=="id."]<-"id"
+  ##ppp_result_aih<- inner_join(ppp_result_aih,physician,by=c("prescriber"="prescriberprofessionalnoanon"))
+  return (ppp_result_aih)
+  
+}
+ppp_result_aih_1<- ppp_physician(1,ppp_aih)
+ppp_result_aih_5<- ppp_physician(5,ppp_aih)
+ppp_result_aih_2<- ppp_physician(2,ppp_aih)
+ppp_result_aih_3<- ppp_physician(3,ppp_aih)
+ppp_result_aih_4<- ppp_physician(4,ppp_aih)
+ppp_result_aih_5<- ppp_physician(5,ppp_aih)
+ppp_result_aih_6<- ppp_physician(6,ppp_aih)
+ppp_result_aih_7<- ppp_physician(7,ppp_aih)
+ppp_result_aih_8<- ppp_physician(8,ppp_aih)
+ppp_result_aih_9<- ppp_physician(9,ppp_aih)
+ppp_result_aih_11<- ppp_physician(11,ppp_aih)
+ppp_result_aih_12<- ppp_physician(12,ppp_aih)
+ppp_result_aih_13<- ppp_physician(13,ppp_aih)
+ppp_result_aih_14<- ppp_physician(14,ppp_aih)
+ppp_result_aih_15<- ppp_physician(15,ppp_aih)
+ppp_result_aih_16<- ppp_physician(16,ppp_aih)
+ppp_result_aih_17<- ppp_physician(17,ppp_aih)
+ppp_result_aih_18<- ppp_physician(18,ppp_aih)
+ppp_result_aih_19<- ppp_physician(19,ppp_aih)
+ppp_result_aih_10<- ppp_physician(10,ppp_aih) 
+ppp_result_aih_20<- ppp_physician(20,ppp_aih)
+
+#### table 8 in chapter 4#####
+descri_plot<- function(cohort){
+  
+  cohort<- cohort[,c('gender','age','length','dosage','simd2016_sc_decile','charlson1yr','charlson10yr','year','prescription')]
+  cohort<- na.omit(cohort)
+  cohort <- cohort %>% filter(cohort$simd2016_sc_decile!='NA')
+  cohort<- ppp_result_aih_1
+  cohort$gender<- ifelse(cohort$gender==1,'Male',"Female")
+  cohort$length<- as.numeric(cohort$length)
+  cohort$simd2016_sc_decile<- fct_infreq(cohort$simd2016_sc_decile)
+  label(cohort$age)<-'Age (years)'
+  label(cohort$gender)<-'Gender'
+  label(cohort$year)<-'Prescription year'
+  label(cohort$dosage)<-'Defined Daily Dosage (mg)'
+  label(cohort$length)<-'Length of staying in hospitals (days)'
+  label(cohort$simd2016_sc_decile)<-'Scottish Index of multiple deprivation (2016)'
+  label(cohort$charlson10yr)<-'Charlson comorbidity index 1 year'
+  label(cohort$charlson1yr)<-'Charlson comorbidity index 10 year'
+  
+  table1(~age+gender+dosage+simd2016_sc_decile+charlson10yr+charlson1yr+year+length|prescription,data=cohort,render.continuous=render.continuous.default)
+  
+}
+descri_plot(ppp_result_aih_1)
+weak_instrument_test_within1yr<- function(n,ppp_aih){
+  w<- c(rep(0,n))
+  c<-c(1:n)
+  E<-c(rep(0,n))
+  ## ols
+  
+  coef<- c(rep(0,n))
+  coef_lm<- c(rep(0,n))
+  se_lm<-c(rep(0,n))
+  ci_lower_lm<-c(rep(0,n))
+  ci_upper_lm<- c(rep(0,n))
+  coef_lm_un<-c(rep(0,n))
+  se_lm_un<- c(rep(0,n))
+  ci_lower_lm_un<-c(rep(0,n))
+  ci_upper_lm_un<-c(rep(0,n))
+  
+  coef_lm_d<- c(rep(0,n))
+  se_lm_d<-c(rep(0,n))
+  ci_lower_lm_d<-c(rep(0,n))
+  ci_upper_lm_d<- c(rep(0,n))
+  coef_lm_un_d<-c(rep(0,n))
+  se_lm_un_d<- c(rep(0,n))
+  ci_lower_lm_un_d<-c(rep(0,n))
+  ci_upper_lm_un_d<-c(rep(0,n))
+  
+  ### propensity score 
+  coef_ps<- c(rep(0,n))
+  se_ps<-c(rep(0,n))
+  ci_lower_ps<-c(rep(0,n))
+  ci_upper_ps<- c(rep(0,n))
+  coef_lm_un<-c(rep(0,n))
+  se_lm_un<- c(rep(0,n))
+  ci_lower_lm_un<-c(rep(0,n))
+  ci_upper_lm_un<-c(rep(0,n))
+  
+  coef_lm_d<- c(rep(0,n))
+  se_lm_d<-c(rep(0,n))
+  ci_lower_lm_d<-c(rep(0,n))
+  ci_upper_lm_d<- c(rep(0,n))
+  coef_lm_un_d<-c(rep(0,n))
+  se_lm_un_d<- c(rep(0,n))
+  ci_lower_lm_un_d<-c(rep(0,n))
+  ci_upper_lm_un_d<-c(rep(0,n))
+  r_s<- c(rep(0,n))
+  iv_beta_un<-c(rep(0,n))
+  iv_beta<- c(rep(0,n))
+  iv_se<- c(rep(0,n))
+  iv_se_un<- c(rep(0,n))
+  ci_lower<- c(rep(0,n))
+  ci_upper<- c(rep(0,n))
+  ci_lower_un<-c(rep(0,n))
+  ci_upper_un<- c(rep(0,n))
+  ### propensity score
+  
+  iv_beta_un_d<-c(rep(0,n))
+  iv_beta_d<- c(rep(0,n))
+  iv_se_d<- c(rep(0,n))
+  iv_se_un_d<- c(rep(0,n))
+  ci_lower_d<- c(rep(0,n))
+  ci_upper_d<- c(rep(0,n))
+  ci_lower_un_d<-c(rep(0,n))
+  ci_upper_un_d<- c(rep(0,n))
+  or_glm<- c(rep(0,n))
+  p_glm<- c(rep(0,n))
+  for(i in 1: n)
+    
+  {
+    data<- ppp_physician(i,ppp_aih)
+    
+    data$rehosp<- data$rehosp_1
+    data$ppp<- data$ppp_proportion
+    data$ppp<-  ifelse(data$ppp>0.942,1,0)
+    fit<- lm_robust(drug~ppp+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=data,clusters =prescriber )
+    s_i<- summary(fit)
+    r_s[i]<- s_i$r.squared
+    coef[i]<-s_i$coefficients[2,1]
+    
+    fit_glm<- glm(drug~ppp+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=ppp_result_aih_1,family = "binomial")
+    s_glm_i<- summary(fit_glm)
+    or_glm[i]<-s_glm_i$coefficients[2,1]
+    p_glm[i]<-s_glm_i$coefficients[2,4]
+    
+    
+    fit_i<- ivreg(rehosp~prescription|ppp,data=data)
+    s_i<-summary(fit_i,diagnostic=TRUE)
+    w[i]= round(s_i$diagnostics[1,"statistic"],3)
+    E[i]=round(s_i$diagnostics[2,"p-value"],3)
+    
+    fit_iv<- iv_robust(rehosp~drug+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile|ppp+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=data,clusters = prescriber)
+    s_i<- summary(fit_iv)
+    iv_beta[i]<- s_i$coefficients[2,1]
+    iv_se[i]<-s_i$coefficients[2,2]
+    ci_lower[i]<-confint(fit_iv)[2,1]
+    ci_upper[i]<- confint(fit_iv)[2,2]
+    fit_iv<- iv_robust(rehosp~drug|ppp,data=data,clusters = prescriber)
+    s_i<- summary(fit_iv)
+    iv_beta_un[i]<- s_i$coefficients[2,1]
+    iv_se_un[i]<-s_i$coefficients[2,2]
+    ci_lower_un[i]<-confint(fit_iv)[2,1]
+    ci_upper_un[i]<- confint(fit_iv)[2,2]
+    fit_lm_i<- lm_robust(rehosp~drug,data=data,clusters = prescriber)
+    s_i_lm<- summary(fit_lm_i)
+    coef_lm_un[i]<- s_i_lm$coefficients[2,1]
+    se_lm_un[i]<- s_i_lm$coefficients[2,2]
+    ci_lower_lm_un[i]<- confint(fit_lm_i)[2,1]
+    ci_upper_lm_un[i]<- confint(fit_lm_i)[2,2]
+    
+    fit_lm_i<- lm_robust(rehosp~drug+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=data,clusters = prescriber)
+    s_i_lm<- summary(fit_lm_i)
+    coef_lm[i]<- s_i_lm$coefficients[2,1]
+    se_lm[i]<-s_i_lm$coefficients[2,2]
+    
+    ci_lower_lm[i]<- confint(fit_lm_i)[2,1]
+    ci_upper_lm[i]<- confint(fit_lm_i)[2,2]
+    
+    
+    ### death
+    
+    fit_iv<- iv_robust(death~drug+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile|ppp+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=data,clusters = prescriber)
+    s_i<- summary(fit_iv)
+    iv_beta_d[i]<- s_i$coefficients[2,1]
+    iv_se_d[i]<-s_i$coefficients[2,2]
+    ci_lower_d[i]<-confint(fit_iv)[2,1]
+    ci_upper_d[i]<- confint(fit_iv)[2,2]
+    fit_iv<- iv_robust(death~drug|ppp,data=data,clusters = prescriber)
+    s_i<- summary(fit_iv)
+    iv_beta_un_d[i]<- s_i$coefficients[2,1]
+    iv_se_un_d[i]<-s_i$coefficients[2,2]
+    ci_lower_un_d[i]<-confint(fit_iv)[2,1]
+    ci_upper_un_d[i]<- confint(fit_iv)[2,2]
+    fit_lm_i<- lm_robust(death~drug,data=data,clusters=prescriber)
+    s_i_lm<- summary(fit_lm_i)
+    coef_lm_un_d[i]<- s_i_lm$coefficients[2,1]
+    se_lm_un_d[i]<- s_i_lm$coefficients[2,2]
+    ci_lower_lm_un_d[i]<- confint(fit_lm_i)[2,1]
+    ci_upper_lm_un_d[i]<- confint(fit_lm_i)[2,2]
+    
+    fit_lm_i<- lm_robust(death~drug+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=data,clusters=prescriber)
+    s_i_lm<- summary(fit_lm_i)
+    coef_lm_d[i]<- s_i_lm$coefficients[2,1]
+    se_lm_d[i]<-s_i_lm$coefficients[2,2]
+    
+    ci_lower_lm_d[i]<- confint(fit_lm_i)[2,1]
+    ci_upper_lm_d[i]<- confint(fit_lm_i)[2,2] 
+  }
+  return(cbind(c,w,E,coef,r_s,or_glm, p_glm,iv_beta_un,iv_se_un,ci_lower_un,ci_upper_un,iv_beta,iv_se,ci_lower,ci_upper,iv_beta_un_d,iv_se_un_d,ci_lower_un_d,ci_upper_un_d,iv_beta_d,iv_se_d,ci_lower_d,ci_upper_d,coef_lm_un,se_lm_un,ci_lower_lm_un,ci_upper_lm_un,coef_lm,se_lm, ci_lower_lm,ci_upper_lm,coef_lm_un_d,se_lm_un_d,ci_lower_lm_un_d,ci_upper_lm_un_d,coef_lm_d,se_lm_d, ci_lower_lm_d,ci_upper_lm_d)
+}
+w_20_t<- weak_instrument_test_within1yr(1,ppp_aih)
+weak_instrument_test_within1yr_d<- function(n,ppp_aih){
+  w<- c(rep(0,n))
+  c<-c(1:n)
+  E<-c(rep(0,n))
+  coef<- c(rep(0,n))
+  coef_lm<- c(rep(0,n))
+  se_lm<-c(rep(0,n))
+  ci_lower_lm<-c(rep(0,n))
+  ci_upper_lm<- c(rep(0,n))
+  coef_lm_un<-c(rep(0,n))
+  se_lm_un<- c(rep(0,n))
+  ci_lower_lm_un<-c(rep(0,n))
+  ci_upper_lm_un<-c(rep(0,n))
+  
+  coef_lm_d<- c(rep(0,n))
+  se_lm_d<-c(rep(0,n))
+  ci_lower_lm_d<-c(rep(0,n))
+  ci_upper_lm_d<- c(rep(0,n))
+  coef_lm_un_d<-c(rep(0,n))
+  se_lm_un_d<- c(rep(0,n))
+  ci_lower_lm_un_d<-c(rep(0,n))
+  ci_upper_lm_un_d<-c(rep(0,n))
+  
+  ### propensity score 
+  coef_ps<- c(rep(0,n))
+  se_ps<-c(rep(0,n))
+  ci_lower_ps<-c(rep(0,n))
+  ci_upper_ps<- c(rep(0,n))
+  coef_lm_un<-c(rep(0,n))
+  se_lm_un<- c(rep(0,n))
+  ci_lower_lm_un<-c(rep(0,n))
+  ci_upper_lm_un<-c(rep(0,n))
+  
+  coef_lm_d<- c(rep(0,n))
+  se_lm_d<-c(rep(0,n))
+  ci_lower_lm_d<-c(rep(0,n))
+  ci_upper_lm_d<- c(rep(0,n))
+  coef_lm_un_d<-c(rep(0,n))
+  se_lm_un_d<- c(rep(0,n))
+  ci_lower_lm_un_d<-c(rep(0,n))
+  ci_upper_lm_un_d<-c(rep(0,n))
+  
+  roc<- c(rep(0,n))
+  r_s<- c(rep(0,n))
+  iv_beta_un<-c(rep(0,n))
+  iv_beta<- c(rep(0,n))
+  iv_se<- c(rep(0,n))
+  iv_se_un<- c(rep(0,n))
+  ci_lower<- c(rep(0,n))
+  ci_upper<- c(rep(0,n))
+  ci_lower_un<-c(rep(0,n))
+  ci_upper_un<- c(rep(0,n))
+  ### propensity score
+  
+  iv_beta_un_d<-c(rep(0,n))
+  iv_beta_d<- c(rep(0,n))
+  iv_se_d<- c(rep(0,n))
+  iv_se_un_d<- c(rep(0,n))
+  ci_lower_d<- c(rep(0,n))
+  ci_upper_d<- c(rep(0,n))
+  ci_lower_un_d<-c(rep(0,n))
+  ci_upper_un_d<- c(rep(0,n))
+  
+  or_glm<- c(rep(0,n))
+  p_glm<- c(rep(0,n))
+  for(i in 1: n)
+    
+  {
+    
+    data<- ppp_physician(i,ppp_aih)
+    # data <-  ppp_result_aih_20
+    #data$ppp<- ifelse(data$ppp>=1,1,0)
+    #data$ppp<- as.character(data$ppp)
+    data$rehosp<-data$rehosp_1
+    fit<- lm_robust(drug~ppp+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=data,clusters =prescriber )
+    s_i<- summary(fit)
+    predict<- predict(fit,newdata=data,type='response')
+    roc[i]<-roc(data$drug~predict)$auc[1]
+    
+    r_s[i]<- s_i$r.squared
+    coef[i]<-s_i$coefficients[2,1]
+    
+    fit_glm<- glm(drug~ppp+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=data,family = "binomial")
+    s_glm_i<- summary(fit_glm)
+    or_glm[i]<-s_glm_i$coefficients[2,1]
+    p_glm[i]<-s_glm_i$coefficients[2,4]
+    
+    
+    fit_i<- ivreg(rehosp~prescription|ppp,data=data)
+    s_i<-summary(fit_i,diagnostic=TRUE)
+    w[i]= round(s_i$diagnostics[1,"statistic"],3)
+    E[i]=round(s_i$diagnostics[2,"p-value"],3)
+    
+    fit_iv<- iv_robust(rehosp~drug+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile|ppp+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=data,clusters = prescriber)
+    s_i<- summary(fit_iv)
+    iv_beta[i]<- s_i$coefficients[2,1]
+    iv_se[i]<-s_i$coefficients[2,2]
+    ci_lower[i]<-confint(fit_iv)[2,1]
+    ci_upper[i]<- confint(fit_iv)[2,2]
+    
+    
+    fit_iv<- iv_robust(rehosp~drug|ppp,data=data,clusters = prescriber)
+    s_i<- summary(fit_iv)
+    
+    iv_beta_un[i]<- s_i$coefficients[2,1]
+    iv_se_un[i]<-s_i$coefficients[2,2]
+    ci_lower_un[i]<-confint(fit_iv)[2,1]
+    ci_upper_un[i]<- confint(fit_iv)[2,2]
+    
+    fit_lm_i<- lm_robust(rehosp~drug,data=data,clusters = prescriber)
+    s_i_lm<- summary(fit_lm_i)
+    coef_lm_un[i]<- s_i_lm$coefficients[2,1]
+    se_lm_un[i]<- s_i_lm$coefficients[2,2]
+    ci_lower_lm_un[i]<- confint(fit_lm_i)[2,1]
+    ci_upper_lm_un[i]<- confint(fit_lm_i)[2,2]
+    
+    fit_lm_i<- lm_robust(rehosp~drug+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=data,clusters = prescriber)
+    s_i_lm<- summary(fit_lm_i)
+    coef_lm[i]<- s_i_lm$coefficients[2,1]
+    se_lm[i]<-s_i_lm$coefficients[2,2]
+    
+    ci_lower_lm[i]<- confint(fit_lm_i)[2,1]
+    ci_upper_lm[i]<- confint(fit_lm_i)[2,2]
+    ### death
+    fit_iv<- iv_robust(death~drug+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile|ppp+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=data,clusters = prescriber)
+    s_i<- summary(fit_iv)
+    iv_beta_d[i]<- s_i$coefficients[2,1]
+    iv_se_d[i]<-s_i$coefficients[2,2]
+    ci_lower_d[i]<-confint(fit_iv)[2,1]
+    ci_upper_d[i]<- confint(fit_iv)[2,2]
+    fit_iv<- iv_robust(death~drug|ppp,data=data,clusters = prescriber)
+    s_i<- summary(fit_iv)
+    iv_beta_un_d[i]<- s_i$coefficients[2,1]
+    iv_se_un_d[i]<-s_i$coefficients[2,2]
+    ci_lower_un_d[i]<-confint(fit_iv)[2,1]
+    ci_upper_un_d[i]<- confint(fit_iv)[2,2]
+    fit_lm_i<- lm_robust(death~drug,data=data,clusters=prescriber)
+    s_i_lm<- summary(fit_lm_i)
+    coef_lm_un_d[i]<- s_i_lm$coefficients[2,1]
+    se_lm_un_d[i]<- s_i_lm$coefficients[2,2]
+    ci_lower_lm_un_d[i]<- confint(fit_lm_i)[2,1]
+    ci_upper_lm_un_d[i]<- confint(fit_lm_i)[2,2]
+    fit_lm_i<- lm_robust(death~drug+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=data,clusters=prescriber)
+    s_i_lm<- summary(fit_lm_i)
+    coef_lm_d[i]<- s_i_lm$coefficients[2,1]
+    se_lm_d[i]<-s_i_lm$coefficients[2,2]
+    ci_lower_lm_d[i]<- confint(fit_lm_i)[2,1]
+    ci_upper_lm_d[i]<- confint(fit_lm_i)[2,2]
+  }
+  return(cbind(c,w,E,coef,roc,r_s,or_glm, p_glm,iv_beta_un,iv_se_un,ci_lower_un,ci_upper_un,iv_beta,iv_se,ci_lower,ci_upper,iv_beta_un_d,iv_se_un_d,ci_lower_un_d,ci_upper_un_d,iv_beta_d,iv_se_d,ci_lower_d,ci_upper_d,coef_lm_un,se_lm_un,ci_lower_lm_un,ci_upper_lm_un,coef_lm,se_lm, ci_lower_lm,ci_upper_lm,coef_lm_un_d,se_lm_un_d,ci_lower_lm_un_d,ci_upper_lm_un_d,coef_lm_d,se_lm_d, ci_lower_lm_d,ci_upper_lm_d))
+  
+}
+w_20_d<- weak_instrument_test_within1yr_d(20,ppp_aih)
+###propensity score
+data<-na.omit(data)
+m.out<- matchit(drug~gender+age+dosage+simd2016_sc_decile+charlson10yr+charlson1yr+year+length,data=data,method='nearest',distancee='glm')
+m.data<- match.data(m.out)
+fit_ps<- lm_robust(rehosp_1~drug+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=m.data,clusters=prescriber)
+fit_ps_d<- lm_robust(death~drug+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=m.data,clusters=prescriber)
+s_ps<- summary(fit_ps)
+s_ps_d<-summary(fit_ps_d)
+ps_results<- as.data.frame(cbind(s_ps$coefficients[2,1],s_ps$coefficients[2,2],s_ps$coefficients[2,5],s_ps$coefficients[2,6]))
+colnames(ps_results)<-c('coef','se','ci_lower','ci_upper')
+ps_results_d<- cbind(s_ps_d$coefficients[2,1],s_ps_d$coefficients[2,2],s_ps_d$coefficients[2,5],s_ps_d$coefficients[2,6])
+ps_results_d<- as.data.frame(ps_results_d)
+colnames(ps_results_d)<-c('coef','se','ci_lower','ci_upper')
+
+### proportional iv
+data<-dich_ppp(ppp_result_aih_1)
+fit_iv<- ivreg(rehosp~drug+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile|ppp_1+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=data)
+fit_iv<- ivreg(rehosp~drug|ppp_1,data=data)
+summary(fit_iv,diagnostic=TRUE)
+fit_glm<- glm(drug~ppp_proportion+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=data,family = "binomial")
+roc(data$drug~predict(fit_glm,newdata=data,type='response'))$auc[1]
+predict<- predict(fit,newdata=data,type='response')
+roc[i]<-roc(data$drug~predict)$auc[1]
+s_glm_i<- summary(fit_glm)
+or_glm[i]<-s_glm_i$coefficients[2,1]
+p_glm[i]<-s_glm_i$coefficients[2,4]
+fit_iv_p_d<- iv_robust(death~drug+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile|ppp_proportion+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=ppp_result_aih_1,clusters = prescriber)
+s_iv_p<- summary(fit_iv_p)
+s_iv_p_d<-summary(fit_iv_p_d)
+iv_p_results<- cbind(s_iv_p$coefficients[2,1],s_iv_p$coefficients[2,2],s_iv_p$coefficients[2,5],s_iv_p$coefficients[2,6])
+iv_p_results<- as.data.frame(iv_p_results)
+colnames(iv_p_results)<-c('coef','se','ci_lower','ci_upper')
+iv_p_results_d<- cbind(s_iv_p_d$coefficients[2,1],s_iv_p_d$coefficients[2,2],s_iv_p_d$coefficients[2,5],s_iv_p_d$coefficients[2,6])
+iv_p_results_d<- as.data.frame(iv_p_results_d)
+colnames(iv_p_results_d)<-c('coef','se','ci_lower','ci_upper')
+
+
+#### dichotomised proportion iv 
+ppp_d<- dich_ppp(ppp_result_aih_1)
+fit_iv_p<- iv_robust(rehosp~drug+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile|ppp_1+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=ppp_d,clusters = prescriber)
+fit_iv_p_d<- iv_robust(death~drug+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile|ppp_1+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=ppp_d,clusters = prescriber)
+s_iv_p<- summary(fit_iv_p)
+s_iv_p_d<-summary(fit_iv_p_d)
+iv_p_results_1<- cbind(s_iv_p$coefficients[2,1],s_iv_p$coefficients[2,2],s_iv_p$coefficients[2,5],s_iv_p$coefficients[2,6])
+iv_p_results_1<- as.data.frame(iv_p_results_1)
+colnames(iv_p_results_1)<-c('coef','se','ci_lower','ci_upper')
+iv_p_results_d_1<- cbind(s_iv_p_d$coefficients[2,1],s_iv_p_d$coefficients[2,2],s_iv_p_d$coefficients[2,5],s_iv_p_d$coefficients[2,6])
+iv_p_results_d_1<- as.data.frame(iv_p_results_d_1)
+colnames(iv_p_results_d_1)<-c('coef','se','ci_lower','ci_upper')
+
+
+## stack up the estimates and confidence interval OLS AND 2SLS
+
+Model<-c("Unadjusted OLS","Adjusted OLS","Propensity score",c(rep(paste("prior",seq(1:20)))),"Proportional IV")
+w_20<- w_20_d
+w_20<- as.data.frame(w_20)
+estimate<- c(unique(w_20$coef_lm_un),unique(w_20$coef_lm),ps_results$coef,w_20$iv_beta,iv_p_results_1$coef)
+ci_lower<- c(unique(w_20$ci_lower_lm_un),unique(w_20$ci_lower_lm),ps_results$ci_lower,w_20$ci_lower,iv_p_results_1$ci_lower)
+ci_upper<- c(unique(w_20$ci_upper_lm_un),unique(w_20$ci_upper_lm),ps_results$ci_upper,w_20$ci_upper,iv_p_results_1$ci_upper)
+
+### Death
+estimate_d<- c(unique(w_20$coef_lm_un_d),unique(w_20$coef_lm_d),ps_results_d$coef,w_20$iv_beta_d,iv_p_results_d_1$coef)
+ci_lower_d<- c(unique(w_20$ci_lower_lm_un_d),unique(w_20$ci_lower_lm_d),ps_results_d$ci_lower,w_20$ci_lower_d,iv_p_results_d_1$ci_lower)
+ci_upper_d<- c(unique(w_20$ci_upper_lm_un_d),unique(w_20$ci_upper_lm_d),ps_results_d$ci_upper,w_20$ci_upper_d,iv_p_results_d_1$ci_upper)
+
+round_df<- function(x,digits){
+  
+  numeric_columns<- sapply(x,mode)=='numeric'
+  x[numeric_columns]<-round(x[numeric_columns],digits)
+}
+
+
+df_t<- as.data.frame(cbind(estimate,ci_lower,ci_upper))
+df_t<-round_df(df_t,3)
+df_t<- data.frame(Model,df_t,stringsAsFactors = FALSE)
+
+df_d<- as.data.frame(cbind(estimate_d,ci_lower_d,ci_upper_d))
+df_d<- round_df(df_d,3)
+df_d<- data.frame(Model,df_d,stringsAsFactors = FALSE)
+
+df_t_1<- as.data.frame(cbind(estimate,ci_lower,ci_upper))
+df_t_1<-round_df(df_t_1,3)
+df_t_1<- data.frame(Model,df_t_1,stringsAsFactors = FALSE)
+
+df_d_1<- as.data.frame(cbind(estimate_d,ci_lower_d,ci_upper_d))
+df_d_1<- round_df(df_d_1,3)
+df_d_1<- data.frame(Model,df_d_1,stringsAsFactors = FALSE)
+
+### ####combine the estimates se, ci_lower, ci_upper together
+
+hr_rehosp<- data.frame(Model,cbind(hr,hr_ci_lower,hr_ci_upper),stringsAsFactors=FALSE)
+
+## Cox regression results
+cox_output_death<- function(n) {
+  hr_un<- c(rep(0,n))
+  hr_aj<-c(rep(0,n))
+  c_lower_un<-c(rep(0,n))
+  c_upper_un<-c(rep(0,n))
+  c_lower_aj<-c(rep(0,n))
+  c_upper_aj<-c(rep(0,n))
+  
+  c1<-c(rep(0,n))
+  c2<-c(rep(0,n))
+  s1<- c(rep(0,n))
+  
+  for(i in 1:n){
+    ppp_result_aih_i<- ppp_physician(i,ppp_aih)
+    #  ppp_result_aih_i<- ppp_result_aih_1
+    ppp_result_aih_i$charlson1yr<- ppp_result_aih_i$charlindex1yr
+    ppp_result_aih_i$charlson10yr<- ppp_result_aih_i$charlindex10yr
+    
+    cox_unadjusted<-  coxph(Surv(timediff_hosp_death,death)~drug+cluster(prescriber),data=ppp_result_aih_i)
+    cox_adjusted<-coxph(Surv(timediff_hosp_death,death)~drug+age+gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile+cluster(prescriber),data=ppp_result_aih_i)
+    fitX.LZ_multi<- glm(drug~ppp+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=ppp_result_aih_i)
+    fitT.LX_multi<- coxph(Surv(timediff_hosp_death,death)~drug+age+gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=ppp_result_aih_i)
+    fitIV_multi<- ivcoxph(estmethod = "ts",fitX.LZ = fitX.LZ_multi,fitT.LX = fitT.LX_multi,clusterid="prescriber",data=ppp_result_aih_i,ctrl = TRUE)
+    c_un<- summary(cox_unadjusted)
+    c_aj<- summary(cox_adjusted)
+    ci_un<- confint(cox_unadjusted)
+    ci_aj<- confint(cox_adjusted)
+    hr_aj[i]<- c_aj$coefficients[1,2]
+    hr_un[i]<- c_un$coefficients[1,2]
+    
+    c_lower_un[i]<-exp(ci_un[1,1])
+    c_upper_un[i]<-exp(ci_un[1,2])
+    c_lower_aj[i]<-exp(ci_aj[1,1])
+    c_upper_aj[i]<-exp(ci_aj[1,2])
+    
+    s<- summary(fitIV_multi)
+    c<-confint(fitIV_multi)
+    c1[i]<-exp(c[1,1])
+    c2[i]<- exp(c[1,2])
+    s1[i]<-exp(s$coefficients[1,1])
+  }
+  return(cbind(hr_un,hr_aj,c_lower_un,c_upper_un,c_lower_aj,c_upper_aj,s1,c1,c2))
+  
+}
+## cox regression model that uses rehospitalization as event
+cox_output_rehosp<- function(n) {
+  hr_un<- c(rep(0,n))
+  hr_aj<-c(rep(0,n))
+  c_lower_un<-c(rep(0,n))
+  c_upper_un<-c(rep(0,n))
+  c_lower_aj<-c(rep(0,n))
+  c_upper_aj<-c(rep(0,n))
+  
+  c1<-c(rep(0,n))
+  c2<-c(rep(0,n))
+  s1<- c(rep(0,n))
+  
+  for(i in 1:n){
+    ppp_result_aih_i<- ppp_physician(i,ppp_aih)
+    #  ppp_result_aih_i<- ppp_result_aih_1
+    ppp_result_aih_i$charlson1yr<- ppp_result_aih_i$charlindex1yr
+    ppp_result_aih_i$charlson10yr<- ppp_result_aih_i$charlindex10yr
+    
+    cox_unadjusted<-  coxph(Surv(timediff_hosp,rehosp_1)~drug+cluster(prescriber),data=ppp_result_aih_i)
+    cox_adjusted<-coxph(Surv(timediff_hosp,rehosp_1)~drug+age+gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile+cluster(prescriber),data=ppp_result_aih_i)
+    fitX.LZ_multi<- glm(drug~ppp+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=ppp_result_aih_i)
+    fitT.LX_multi<- coxph(Surv(timediff_hosp,rehosp_1)~drug+age+gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=ppp_result_aih_i)
+    fitIV_multi<- ivcoxph(estmethod = "ts",fitX.LZ = fitX.LZ_multi,fitT.LX = fitT.LX_multi,clusterid="prescriber",data=ppp_result_aih_i,ctrl = TRUE)
+    c_un<- summary(cox_unadjusted)
+    c_aj<- summary(cox_adjusted)
+    ci_un<- confint(cox_unadjusted)
+    ci_aj<- confint(cox_adjusted)
+    hr_aj[i]<- c_aj$coefficients[1,2]
+    hr_un[i]<- c_un$coefficients[1,2]
+    
+    c_lower_un[i]<-exp(ci_un[1,1])
+    c_upper_un[i]<-exp(ci_un[1,2])
+    c_lower_aj[i]<-exp(ci_aj[1,1])
+    c_upper_aj[i]<-exp(ci_aj[1,2])
+    
+    s<- summary(fitIV_multi)
+    c<-confint(fitIV_multi)
+    c1[i]<-exp(c[1,1])
+    c2[i]<- exp(c[1,2])
+    s1[i]<-exp(s$coefficients[1,1])
+  }
+  return(cbind(hr_un,hr_aj,c_lower_un,c_upper_un,c_lower_aj,c_upper_aj,s1,c1,c2))
+  
+}
+cox_output_death_p<- function(n) {
+  hr_un<- c(rep(0,n))
+  hr_aj<-c(rep(0,n))
+  c_lower_un<-c(rep(0,n))
+  c_upper_un<-c(rep(0,n))
+  c_lower_aj<-c(rep(0,n))
+  c_upper_aj<-c(rep(0,n))
+  
+  c1<-c(rep(0,n))
+  c2<-c(rep(0,n))
+  s1<- c(rep(0,n))
+  
+  for(i in 1:n){
+    ppp_result_aih_i<- ppp_physician(i,ppp_aih)
+    #  ppp_result_aih_i<- ppp_result_aih_1
+    ppp_result_aih_i$charlson1yr<- ppp_result_aih_i$charlindex1yr
+    ppp_result_aih_i$charlson10yr<- ppp_result_aih_i$charlindex10yr
+    ppp_result_aih_i$ppp<- ppp_result_aih_i$ppp_proportion
+    
+    cox_unadjusted<-  coxph(Surv(timediff_hosp_death,death)~drug+cluster(prescriber),data=ppp_result_aih_i)
+    cox_adjusted<-coxph(Surv(timediff_hosp_death,death)~drug+age+gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile+cluster(prescriber),data=ppp_result_aih_i)
+    fitX.LZ_multi<- glm(drug~ppp+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=ppp_result_aih_i)
+    fitT.LX_multi<- coxph(Surv(timediff_hosp_death,death)~drug+age+gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=ppp_result_aih_i)
+    fitIV_multi<- ivcoxph(estmethod = "ts",fitX.LZ = fitX.LZ_multi,fitT.LX = fitT.LX_multi,clusterid="prescriber",data=ppp_result_aih_i,ctrl = TRUE)
+    c_un<- summary(cox_unadjusted)
+    c_aj<- summary(cox_adjusted)
+    ci_un<- confint(cox_unadjusted)
+    ci_aj<- confint(cox_adjusted)
+    hr_aj[i]<- c_aj$coefficients[1,2]
+    hr_un[i]<- c_un$coefficients[1,2]
+    
+    c_lower_un[i]<-exp(ci_un[1,1])
+    c_upper_un[i]<-exp(ci_un[1,2])
+    c_lower_aj[i]<-exp(ci_aj[1,1])
+    c_upper_aj[i]<-exp(ci_aj[1,2])
+    
+    s<- summary(fitIV_multi)
+    c<-confint(fitIV_multi)
+    c1[i]<-exp(c[1,1])
+    c2[i]<- exp(c[1,2])
+    s1[i]<-exp(s$coefficients[1,1])
+  }
+  return(cbind(hr_un,hr_aj,c_lower_un,c_upper_un,c_lower_aj,c_upper_aj,s1,c1,c2))
+  
+}
+## cox regression model that uses rehospitalization as event
+cox_output_rehosp_p<- function(n) {
+  hr_un<- c(rep(0,n))
+  hr_aj<-c(rep(0,n))
+  c_lower_un<-c(rep(0,n))
+  c_upper_un<-c(rep(0,n))
+  c_lower_aj<-c(rep(0,n))
+  c_upper_aj<-c(rep(0,n))
+  
+  c1<-c(rep(0,n))
+  c2<-c(rep(0,n))
+  s1<- c(rep(0,n))
+  
+  for(i in 1:n){
+    ppp_result_aih_i<- ppp_physician(i,ppp_aih)
+    #  ppp_result_aih_i<- ppp_result_aih_1
+    ppp_result_aih_i$charlson1yr<- ppp_result_aih_i$charlindex1yr
+    ppp_result_aih_i$charlson10yr<- ppp_result_aih_i$charlindex10yr
+    ppp_result_aih_i$ppp<- ppp_result_aih_i$ppp_proportion
+    cox_unadjusted<-  coxph(Surv(timediff_hosp,rehosp_1)~drug+cluster(prescriber),data=ppp_result_aih_i)
+    cox_adjusted<-coxph(Surv(timediff_hosp,rehosp_1)~drug+age+gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile+cluster(prescriber),data=ppp_result_aih_i)
+    fitX.LZ_multi<- glm(drug~ppp+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=ppp_result_aih_i)
+    fitT.LX_multi<- coxph(Surv(timediff_hosp,rehosp_1)~drug+age+gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=ppp_result_aih_i,cluster=)
+    fitIV_multi<- ivcoxph(estmethod = "ts",fitX.LZ = fitX.LZ_multi,fitT.LX = fitT.LX_multi,clusterid="prescriber",data=ppp_result_aih_i,ctrl = TRUE)
+    c_un<- summary(cox_unadjusted)
+    c_aj<- summary(cox_adjusted)
+    ci_un<- confint(cox_unadjusted)
+    ci_aj<- confint(cox_adjusted)
+    hr_aj[i]<- c_aj$coefficients[1,2]
+    hr_un[i]<- c_un$coefficients[1,2]
+    
+    c_lower_un[i]<-exp(ci_un[1,1])
+    c_upper_un[i]<-exp(ci_un[1,2])
+    c_lower_aj[i]<-exp(ci_aj[1,1])
+    c_upper_aj[i]<-exp(ci_aj[1,2])
+    
+    s<- summary(fitIV_multi)
+    c<-confint(fitIV_multi)
+    c1[i]<-exp(c[1,1])
+    c2[i]<- exp(c[1,2])
+    s1[i]<-exp(s$coefficients[1,1])
+  }
+  return(cbind(hr_un,hr_aj,c_lower_un,c_upper_un,c_lower_aj,c_upper_aj,s1,c1,c2))
+  
+}
+
+label<-c("Model","Unadjusted","Adjusted",c(rep(paste("prior",seq(1:20)))),"Proportional IV")
+results_form<- function(data,data_p){
+  data<-as.data.frame(data)
+  data<- round_df(data,3)
+  
+  data_p<-as.data.frame(data_p)
+  data_p<-round_df(data_p,3)
+  Model<-c("Unadjusted Coxregression","Adjusted Cox regression",c(rep(paste("prior",seq(1:20)))),"Proportional IV")
+  hr<- c(unique(data$hr_un),unique(data$hr_aj),data$s1,data_p$s1)
+  hr_ci_lower<-c(unique(data$c_lower_un),unique(data$c_lower_aj),data$c1,data_p$c1)
+  hr_ci_upper<-c(unique(data$c_upper_un),unique(data$c_upper_aj),data$c2,data_p$c2)
+  
+  hr<- data.frame(Model,cbind(hr,hr_ci_lower,hr_ci_upper),stringsAsFactors=FALSE)
+  
+  
+  return(hr)
+}
+for_plot_ci<- function(title,data){
+  data[,1]<- factor(data[,1],levels=rev(data[,1]))
+  data<-test_tsri
+  ggplot(data=data,aes(x=data[,1],y=data[,2],ymin=data[,3],ymax=data[,4]),group=data[,5],colour=data[,5])+
+    geom_pointrange(size=0.2)+
+    ylim(c(0.0,2.1))+
+    geom_hline(yintercept = 1,lty=2)+
+    coord_flip()+
+    xlab("Model")+ylab("Hazard Ratio (95% CI)")+
+    theme_bw()+
+    geom_text(aes(label=data[,2]),size=3,vjust=1.2)+
+    ggtitle(title)
+}
+cox_2sri_hosp<-function(n){
+  
+  hr_un<- c(rep(0,n))
+  hr_aj<-c(rep(0,n))
+  c_lower_un<-c(rep(0,n))
+  c_upper_un<-c(rep(0,n))
+  c_lower_aj<-c(rep(0,n))
+  c_upper_aj<-c(rep(0,n))
+  
+  c1<-c(rep(0,n))
+  c2<-c(rep(0,n))
+  s1<- c(rep(0,n))
+  
+  for(i in 1:n){
+    ppp_result_aih_i<- ppp_physician(i,ppp_aih)
+    ppp_result_aih_i$ppp<- ppp_result_aih_i$ppp_proportion
+    ppp_result_aih_i$ppp<- ifelse(ppp_result_aih_i$ppp>=0.942,1,0)
+    
+    cox_unadjusted<-  coxph(Surv(timediff_hosp,rehosp_1)~drug+cluster(prescriber),data=ppp_result_aih_i)
+    cox_adjusted<-coxph(Surv(timediff_hosp,rehosp_1)~drug+age+gender+ dosage+ charlson10yr+charlson1yr+length+simd2016_sc_decile+cluster(prescriber),data=ppp_result_aih_i)
+    fitX.LZ_multi<- glm(drug~ppp+age+ gender+ dosage+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=ppp_result_aih_i)
+    r1<-ppp_result_aih_i$drug-predict.glm(fitX.LZ_multi)
+    
+    fitT.LX_multi<- coxph(Surv(timediff_hosp,rehosp_1)~prescription+r1+age+gender+ dosage+ charlson10yr+charlson1yr+length+simd2016_sc_decile+cluster(prescriber),data=ppp_result_aih_i)
+    
+    
+    # fitIV_multi<- ivcoxph(estmethod = "ts",fitX.LZ = fitX.LZ_multi,fitT.LX = fitT.LX_multi,clusterid="prescriber",data=ppp_result_aih_i,ctrl = TRUE)
+    c_un<- summary(cox_unadjusted)
+    c_aj<- summary(cox_adjusted)
+    ci_un<- confint(cox_unadjusted)
+    ci_aj<- confint(cox_adjusted)
+    hr_aj[i]<- c_aj$coefficients[1,2]
+    hr_un[i]<- c_un$coefficients[1,2]
+    
+    c_lower_un[i]<-exp(ci_un[1,1])
+    c_upper_un[i]<-exp(ci_un[1,2])
+    c_lower_aj[i]<-exp(ci_aj[1,1])
+    c_upper_aj[i]<-exp(ci_aj[1,2])
+    
+    s<- summary(fitT.LX_multi)
+    c<-confint(fitT.LX_multi)
+    c1[i]<-exp(c[1,1])
+    c2[i]<- exp(c[1,2])
+    s1[i]<-exp(s$coefficients[1,1])
+  }
+  return(cbind(hr_un,hr_aj,c_lower_un,c_upper_un,c_lower_aj,c_upper_aj,s1,c1,c2))
+  
+  
+  
+}
+
+cox_2sri_death<- function(n){
+  
+  hr_un<- c(rep(0,n))
+  hr_aj<-c(rep(0,n))
+  c_lower_un<-c(rep(0,n))
+  c_upper_un<-c(rep(0,n))
+  c_lower_aj<-c(rep(0,n))
+  c_upper_aj<-c(rep(0,n))
+  
+  c1<-c(rep(0,n))
+  c2<-c(rep(0,n))
+  s1<- c(rep(0,n))
+  
+  for(i in 1:n){
+    ppp_result_aih_i<- ppp_physician(i,ppp_aih)
+    #  ppp_result_aih_i<- ppp_result_aih_1
+    ppp_result_aih_i$ppp<-ppp_result_aih_i$ppp_proportion
+    ppp_result_aih_i$ppp<- ifelse(ppp_result_aih_i$ppp>=0.942,1,0)
+    cox_unadjusted<-  coxph(Surv(timediff_hosp_death,death)~drug+cluster(prescriber),data=ppp_result_aih_i)
+    cox_adjusted<-coxph(Surv(timediff_hosp_death,death)~drug+age+gender+ dosage+ charlson10yr+charlson1yr+length+simd2016_sc_decile+cluster(prescriber),data=ppp_result_aih_i)
+    fitX.LZ_multi<- glm(drug~ppp+age+ gender+ dosage+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=ppp_result_aih_i)
+    # data<-data[!is.na(data$ppp),]
+    r1<-ppp_result_aih_i$drug-predict.glm(fitX.LZ_multi)
+    
+    fitT.LX_multi<- coxph(Surv(timediff_hosp_death,death)~prescription+r1+age+gender+ dosage+ charlson10yr+charlson1yr+length+simd2016_sc_decile+cluster(prescriber),data=ppp_result_aih_i)
+    
+    
+    # fitIV_multi<- ivcoxph(estmethod = "ts",fitX.LZ = fitX.LZ_multi,fitT.LX = fitT.LX_multi,clusterid="prescriber",data=ppp_result_aih_i,ctrl = TRUE)
+    c_un<- summary(cox_unadjusted)
+    c_aj<- summary(cox_adjusted)
+    ci_un<- confint(cox_unadjusted)
+    ci_aj<- confint(cox_adjusted)
+    hr_aj[i]<- c_aj$coefficients[1,2]
+    hr_un[i]<- c_un$coefficients[1,2]
+    
+    c_lower_un[i]<-exp(ci_un[1,1])
+    c_upper_un[i]<-exp(ci_un[1,2])
+    c_lower_aj[i]<-exp(ci_aj[1,1])
+    c_upper_aj[i]<-exp(ci_aj[1,2])
+    
+    s<- summary(fitT.LX_multi)
+    c<-confint(fitT.LX_multi)
+    c1[i]<-exp(c[1,1])
+    c2[i]<- exp(c[1,2])
+    s1[i]<-exp(s$coefficients[1,1])
+  }
+  return(cbind(hr_un,hr_aj,c_lower_un,c_upper_un,c_lower_aj,c_upper_aj,s1,c1,c2))
+  
+  
+  
+}
+## proportion IV
+cox_2sri_death_p<- function(n){
+  
+  hr_un<- c(rep(0,n))
+  hr_aj<-c(rep(0,n))
+  c_lower_un<-c(rep(0,n))
+  c_upper_un<-c(rep(0,n))
+  c_lower_aj<-c(rep(0,n))
+  c_upper_aj<-c(rep(0,n))
+  
+  c1<-c(rep(0,n))
+  c2<-c(rep(0,n))
+  s1<- c(rep(0,n))
+  
+  for(i in 1:n){
+    ppp_result_aih_i<- ppp_physician(i,ppp_aih)
+    cox_unadjusted<-  coxph(Surv(timediff_hosp_death,death)~drug+cluster(prescriber),data=ppp_result_aih_i)
+    cox_adjusted<-coxph(Surv(timediff_hosp_death,death)~drug+age+gender+ dosage+ charlson10yr+charlson1yr+length+simd2016_sc_decile+cluster(prescriber),data=ppp_result_aih_i)
+    fitX.LZ_multi<- glm(drug~ppp_proportion+age+ gender+ dosage+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=ppp_result_aih_i)
+    r1<-ppp_result_aih_i$drug-predict.glm(fitX.LZ_multi)
+    fitT.LX_multi<- coxph(Surv(timediff_hosp_death,death)~prescription+r1+age+gender+ dosage+ charlson10yr+charlson1yr+length+simd2016_sc_decile+cluster(prescriber),data=ppp_result_aih_i)
+    c_un<- summary(cox_unadjusted)
+    c_aj<- summary(cox_adjusted)
+    ci_un<- confint(cox_unadjusted)
+    ci_aj<- confint(cox_adjusted)
+    hr_aj[i]<- c_aj$coefficients[1,2]
+    hr_un[i]<- c_un$coefficients[1,2]
+    c_lower_un[i]<-exp(ci_un[1,1])
+    c_upper_un[i]<-exp(ci_un[1,2])
+    c_lower_aj[i]<-exp(ci_aj[1,1])
+    c_upper_aj[i]<-exp(ci_aj[1,2])
+    s<- summary(fitT.LX_multi)
+    c<-confint(fitT.LX_multi)
+    c1[i]<-exp(c[1,1])
+    c2[i]<- exp(c[1,2])
+    s1[i]<-exp(s$coefficients[1,1])
+  }
+  return(cbind(hr_un,hr_aj,c_lower_un,c_upper_un,c_lower_aj,c_upper_aj,s1,c1,c2))
+}
+
+cox_2sri_hosp_p<-function(n){
+  
+  hr_un<- c(rep(0,n))
+  hr_aj<-c(rep(0,n))
+  c_lower_un<-c(rep(0,n))
+  c_upper_un<-c(rep(0,n))
+  c_lower_aj<-c(rep(0,n))
+  c_upper_aj<-c(rep(0,n))
+  
+  c1<-c(rep(0,n))
+  c2<-c(rep(0,n))
+  s1<- c(rep(0,n))
+  
+  for(i in 1:n){
+    ppp_result_aih_i<- ppp_physician(i,ppp_aih)    
+    cox_unadjusted<-  coxph(Surv(timediff_hosp,rehosp_1)~drug+cluster(prescriber),data=ppp_result_aih_i)
+    cox_adjusted<-coxph(Surv(timediff_hosp,rehosp_1)~drug+age+gender+ dosage+ charlson10yr+charlson1yr+length+simd2016_sc_decile+cluster(prescriber),data=ppp_result_aih_i)
+    fitX.LZ_multi<- glm(drug~ppp_proportion+age+ gender+ dosage+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=ppp_result_aih_i)
+    r1<-ppp_result_aih_i$drug-predict.glm(fitX.LZ_multi)
+    
+    fitT.LX_multi<- coxph(Surv(timediff_hosp,rehosp_1)~prescription+r1+age+gender+ dosage+ charlson10yr+charlson1yr+length+simd2016_sc_decile+cluster(prescriber),data=ppp_result_aih_i)
+    c_un<- summary(cox_unadjusted)
+    c_aj<- summary(cox_adjusted)
+    ci_un<- confint(cox_unadjusted)
+    ci_aj<- confint(cox_adjusted)
+    hr_aj[i]<- c_aj$coefficients[1,2]
+    hr_un[i]<- c_un$coefficients[1,2]
+    
+    c_lower_un[i]<-exp(ci_un[1,1])
+    c_upper_un[i]<-exp(ci_un[1,2])
+    c_lower_aj[i]<-exp(ci_aj[1,1])
+    c_upper_aj[i]<-exp(ci_aj[1,2])
+    
+    s<- summary(fitT.LX_multi)
+    c<-confint(fitT.LX_multi)
+    c1[i]<-exp(c[1,1])
+    c2[i]<- exp(c[1,2])
+    s1[i]<-exp(s$coefficients[1,1])
+  }
+  return(cbind(hr_un,hr_aj,c_lower_un,c_upper_un,c_lower_aj,c_upper_aj,s1,c1,c2))
+  
+}
+
+cox_2sri_nd<- function(n){
+  
+  hr_un<- c(rep(0,n))
+  hr_aj<-c(rep(0,n))
+  c_lower_un<-c(rep(0,n))
+  c_upper_un<-c(rep(0,n))
+  c_lower_aj<-c(rep(0,n))
+  c_upper_aj<-c(rep(0,n))
+  
+  c1<-c(rep(0,n))
+  c2<-c(rep(0,n))
+  s1<- c(rep(0,n))
+  
+  for(i in 1:n){
+    ppp_result_aih_i<- ppp_physician(i,ppp_aih)
+    ppp_result_aih_i$charlson1yr<- ppp_result_aih_i$charlindex1yr
+    ppp_result_aih_i$charlson10yr<- ppp_result_aih_i$charlindex10yr
+    cox_unadjusted<-  coxph(Surv(timediff_hosp_death,death)~drug+cluster(prescriber),data=ppp_result_aih_i)
+    cox_adjusted<-coxph(Surv(timediff_hosp_death,death)~drug+age+gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile+cluster(prescriber),data=ppp_result_aih_i)
+    fitX.LZ_multi<- glm(drug~ppp+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=ppp_result_aih_i)
+    r1<-ppp_result_aih_i$drug-predict.glm(fitX.LZ_multi)
+    fitT.LX_multi<- coxph(Surv(timediff_hosp_death,death)~prescription+r1+age+gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile+cluster(prescriber),data=ppp_result_aih_i)
+    c_un<- summary(cox_unadjusted)
+    c_aj<- summary(cox_adjusted)
+    ci_un<- confint(cox_unadjusted)
+    ci_aj<- confint(cox_adjusted)
+    hr_aj[i]<- c_aj$coefficients[1,2]
+    hr_un[i]<- c_un$coefficients[1,2]
+    c_lower_un[i]<-exp(ci_un[1,1])
+    c_upper_un[i]<-exp(ci_un[1,2])
+    c_lower_aj[i]<-exp(ci_aj[1,1])
+    c_upper_aj[i]<-exp(ci_aj[1,2])
+    s<- summary(fitT.LX_multi)
+    c<-confint(fitT.LX_multi)
+    c1[i]<-exp(c[1,1])
+    c2[i]<- exp(c[1,2])
+    s1[i]<-exp(s$coefficients[1,1])
+  }
+  return(cbind(hr_un,hr_aj,c_lower_un,c_upper_un,c_lower_aj,c_upper_aj,s1,c1,c2))
+  
+}
+
+results_form<- function(data,data_p){
+  data<-as.data.frame(data)
+  data<- round_df(data,3)
+  data_p<-as.data.frame(data_p)
+  data_p<-round_df(data_p,3)
+  Model<-c("Unadjusted Coxregression","Adjusted Cox regression",c(rep(paste("prior",seq(1:20)))),"Proportional IV")
+  hr<- c(unique(data$hr_un),unique(data$hr_aj),data$s1,data_p$s1)
+  hr_ci_lower<-c(unique(data$c_lower_un),unique(data$c_lower_aj),data$c1,data_p$c1)
+  hr_ci_upper<-c(unique(data$c_upper_un),unique(data$c_upper_aj),data$c2,data_p$c2)
+  hr<- data.frame(Model,cbind(hr,hr_ci_lower,hr_ci_upper),stringsAsFactors=FALSE)
+  return(hr)
+}
+
+
+tsri_r<- results_form(cox_2sri_hosp,cox_2sri_hosp_p)
+tsri_r_d<-  results_form(cox_2sri_death,cox_2sri_death_p)
+tsri_d_r<- results_form(cox_2sri_hosp_d,cox_2sri_hosp_d_p)
+tsri_r<- tsri_r %>% mutate(id='non-dichotomised PPP IV')
+tsri_d_r<- tsri_d_r %>% mutate(id='dichotomised PPP IV')
+tsri_d_d<- results_form(cox_2sri_death_d,cox_2sri_death_d_p)
+list_of_dataset<- list('rehosp'=tsri_r,'death'=tsri_r_d,'rehosp_dich'=tsri_d_r,'deat_dich'=tsri_d_d)
+write.xlsx(list_of_dataset,file='cox_estimate.xlsx')
+
+
+##Figure 3 and Figure4
+df_t<-read_xlsx('ols_2sls_estimate.xlsx',sheet=1)
+df_t <- df_t %>% mutate(Type='Non-dichotomised',outcome='Hospitalisation')
+df_d<-read_xlsx('ols_2sls_estimate.xlsx',sheet=2)
+df_d<- df_d %>% mutate(Type='Non-dichotomised', outcome='Death')
+names(df_d)[names(df_d)=='ci_lower_d']<-'ci_lower'
+names(df_d)[names(df_d)=='ci_upper_d']<-'ci_upper'
+names(df_d)[names(df_d)=='estimate_d']<-'estimate'
+
+df_t_1<-read_xlsx('ols_2sls_estimate.xlsx',sheet=3)
+df_t_1 <- df_t_1 %>% mutate(Type='Dichotomised', outcome='Hospitalisation')
+df_d_1<-read_xlsx('ols_2sls_estimate.xlsx',sheet=4)
+df_d_1 <- df_d_1 %>% mutate( Type='Dichotomised',outcome='Death')
+names(df_d_1)[names(df_d_1)=='ci_lower_d']<-'ci_lower'
+names(df_d_1)[names(df_d_1)=='ci_upper_d']<-'ci_upper'
+names(df_d_1)[names(df_d_1)=='estimate_d']<-'estimate'
+### Figure 3 in chapter 4
+
+df<- rbind(df_t,df_d,df_t_1,df_d_1)
+df<-as.data.frame(df)
+level_order<- rev(c('Unadjusted OLS','Adjusted OLS','Propensity score',c(paste ('prior',seq(1:20))),'Proportional IV'))
+for_plot<- function(title,data){
+  
+  data<-df
+  ggplot()+
+    geom_pointrange(data=data,aes(x=factor(Model,levels=level_order),y=estimate,ymin=ci_lower,ymax=ci_upper,color=Type),size=0.2,position = position_dodge(width = .75))+
+    geom_hline(yintercept = 0,lty=2)+
+    # theme_bw()+
+    facet_grid(~outcome)+
+    #theme(panel.border = element_blank())+
+    theme(plot.margin = unit(c(2,2,2,2),'lines'))+
+    xlab("Model")+ylab("Risk difference (95% CI)")+
+    
+    #   annotate('segment',x=-1,xend=-1,y=-1,yend=-2,size=0.2,arrow=arrow(length=unit(0.3,'cm')))+
+    coord_flip()+
+    ggtitle(title)
+}
+for_plot('OLS, Propensity score and 2SLS estimates',df)
+## Figure 4 in Chapter 4
+
+cox_hosp<-read_xlsx('cox_estimate.xlsx',sheet=1)
+cox_hosp<- cox_hosp %>% mutate(Type='Non-dichotomised', outcome='Hospitalisation')
+cox_death<-read_xlsx('cox_estimate.xlsx',sheet=2)
+cox_death<- cox_death %>% mutate(Type='Non-dichotomised', outcome='Death')
+cox_hosp_d<-read_xlsx('cox_estimate.xlsx',sheet=3)
+cox_hosp_d<- cox_hosp_d %>% mutate(Type='Dichotomised', outcome='Hospitalisation')
+cox_death_d<-read_xlsx('cox_estimate.xlsx',sheet=4)
+cox_death_d<- cox_death_d %>% mutate(Type='Dichotomised', outcome='Death')
+cox<-rbind(cox_hosp,cox_death,cox_hosp_d,cox_death_d)
+cox$Model<- ifelse(cox$Model=='Unadjusted Coxregression','Unadjusted Cox regression',cox$Model)
+level_order_<- rev(c('Unadjusted Cox regression','Adjusted Cox regression','Propensity score',c(paste ('prior',seq(1:20))),'Proportional IV'))
+for_plot_ci<- function(title,data){
+  ggplot()+
+    geom_pointrange(data=data,aes(x=factor(Model,levels=level_order_),y=hr,ymin=hr_ci_lower,ymax=hr_ci_upper,color=Type),size=0.2,position = position_dodge(width = .75))+
+    coord_flip()+
+    theme_bw()+
+    #geom_point(position = position_jitterdodge(),size=1)+
+    #geom_text(aes(label=estimate),size=3,vjust=1.2,hjust=1.2)+
+    geom_hline(yintercept = 1,lty=2)+
+    xlab("Model")+ylab("Hazard Ratio (95% CI)")+
+    facet_wrap(~outcome)+
+    ggtitle(title)
+}
+for_plot_ci("Coventional Cox regression and IV-based Cox regression results",cox)
+
+### sensitivity analysis, Figure 3 and Figure 4 in supplementary material
+model<- lm(rehosp~drug+age+ gender+ dosage+ year+ charlson10yr+charlson1yr+length+simd2016_sc_decile,data=ppp_result_aih_1)
+sens<-sensemakr(model,treatment="drug",benchmark_covariates="simd2016_sc_decile10",kd=1:10)
+summary(sens)
+
+
+#### sensitivity analysis to unmeasured confounding in survival analysis, Figure 5 in Chapter 4
+test<- ppp_result_aih_1[,c('age','gender','death','rehosp_1','simd2016_sc_decile','charlson1yr','charlson10yr','length','dosage','drug','timediff_hosp_death','timediff_hosp')]
+test<- test %>% na.omit()
+data<-list(t=test$timediff_hosp_death,d=test$death,Z=test$drug,X=cbind(test$age,as.numeric(test$gender),as.numeric(test$simd2016_sc_decile),as.numeric(test$charlson1yr),as.numeric(test$charlson10yr),test$dosage,test$length))
+
+tau.sto<-survSensitivity(data$t, data$d, data$Z, data$X, method="stoEM_reg", zetaT = seq(-2,2,by=0.5),
+                         zetaZ = seq(-2,2,by=0.5), B = 3)
+
+data_1<-list(t=as.numeric(test$timediff_hosp),d=test$rehosp_1,Z=test$drug,X=cbind(test$age,as.numeric(test$gender)),as.numeric(test$simd2016_sc_decile),as.numeric(test$charlson1yr),as.numeric(test$charlson10yr),test$dosage,test$length)
+tau.sto_1<-survSensitivity(data_1$t, data_1$d, data_1$Z, data_1$X, method="stoEM_reg", zetaT = seq(-2,2,by=0.5),
+                           zetaZ = seq(-2,2,by=0.5), B = 3)
+s1<-plotsens(tau.sto,"zetaz",'zetat','tau1',coeff0 = -0.326)+ggtitle("Death as outcome")
+s2<- plotsens(tau.sto_1,"zetaz",'zetat','tau1',coeff0 = -0.242)+ggtitle("Rehospitalisation as outcome")
+ggarrange(s2,s1)
+
+### Figure 1 and Figure 2 in the supplementary material, using dichotomised PPP IV (at median)
+
+SMD_VALUE<- function(data){
+  data<- ppp_result_aih_20
+  data$ppp_1<-ifelse(data$ppp>=1,1,0)
+  
+  cohort_sub<- data[,c('ppp_1',"patientid","prescriber","gender","age","dosage","simd2016_sc_decile","drug","charlson10yr","charlson1yr","length","year","death","rehosp_1")]
+  cohort_sub<- cohort_sub %>% na.omit()
+  m.out_iv<- matchit(ppp_1~gender+age+dosage+simd2016_sc_decile+charlson10yr+charlson1yr+year+length,data=cohort_sub,method=NULL,replace = TRUE)
+  smd_iv<- (bal.tab(m.out_iv,un=TRUE))
+  m.out<- matchit(drug~gender+age+dosage+simd2016_sc_decile+charlson10yr+charlson1yr+year+length,data=cohort_sub,method=NULL,replace=TRUE)
+  smd<- (bal.tab(m.out,un=TRUE))
+  g1<-love.plot(m.out,binary="std",thresholds=c(m=.1),var.names = new.names,drop.distance = TRUE)
+  g2<-love.plot(m.out_iv,binary="std",thresholds=c(m=.1),var.names = new.names,drop.distance = TRUE)
+  love.plot(list(m.out,m.out_iv),binary='std',thresholds=c(m=.1),var.names = new.names,drop.distance =TRUE,abs=TRUE,line = TRUE)
+  #return(cbind(smd$Balance,smd_iv$Balance))
+  
+}
+
+SMD_VALUE(ppp_result_aih_20)
+
+###  values of IV estimand ,Table 4 in supplementary material
+cov_calu<-function(data){
+  data<- data %>% filter(!is.na(ppp))
+  data$ppp<- ifelse(data$ppp_proportion>=0.9459,1,0)
+  
+  p1<-nrow(data[data$ppp==1&data$drug==1,])/ nrow( data[data$ppp==1,])
+  p2<-nrow(data[data$ppp==0&data$drug==1,])/ nrow( data[data$ppp==0,])
+  p3<-nrow(data[data$ppp==1&data$death==1,])/ nrow( data[data$ppp==1,])
+  p4<-nrow(data[data$ppp==0&data$death==1,])/ nrow( data[data$ppp==0,])
+  #c<-cov(data$death,data$ppp)/cov(data$drug,data$ppp)
+  c<- (p3-p4)/(p1-p2)
+  return(c)
+}
+cov_calu(ppp_result_aih_1)
+cov_calu(ppp_result_aih_2)
+cov_calu(ppp_result_aih_3)
+cov_calu(ppp_result_aih_4)
+cov_calu(ppp_result_aih_5)
+cov_calu(ppp_result_aih_6)
+cov_calu(ppp_result_aih_7)
+cov_calu(ppp_result_aih_8)
+cov_calu(ppp_result_aih_9)
+cov_calu(ppp_result_aih_10)
+cov_calu(ppp_result_aih_11)
+cov_calu(ppp_result_aih_12)
+cov_calu(ppp_result_aih_13)
+cov_calu(ppp_result_aih_14)
+cov_calu(ppp_result_aih_15)
+cov_calu(ppp_result_aih_16)
+cov_calu(ppp_result_aih_17)
+cov_calu(ppp_result_aih_18)
+cov_calu(ppp_result_aih_19)
+cov_calu(ppp_result_aih_20)
+cov_calu(ppp_result_aih_15)
+cov_calu(ppp_result_aih_20)
+
+### validation of monotonicity assumption Table 3 in supplementary material
+
+mono_test<- function(data){
+  
+  data<- data[!is.na(data$ppp),]
+  m<- summary(data$ppp)[3] ### median
+  data$ppp<- ifelse(data$ppp>=1,1,0) ### dichotomised at median
+  xt<- xtabs(~drug+death+ppp,data=data)
+  p<- prop.table(xt,margin = 3)
+  bpres<- bpbounds(p)
+  s<-summary(bpres)
+  return(c(s$inequality,s$monoinequality))
+}
+
+mono_test(ppp_result_aih_1)
+mono_test(ppp_result_aih_2)
+mono_test(ppp_result_aih_3)
+mono_test(ppp_result_aih_4)
+mono_test(ppp_result_aih_5)
+mono_test(ppp_result_aih_6)
+mono_test(ppp_result_aih_7)
+mono_test(ppp_result_aih_8)
+mono_test(ppp_result_aih_9)
+mono_test(ppp_result_aih_10)
+mono_test(ppp_result_aih_11)
+mono_test(ppp_result_aih_12)
+mono_test(ppp_result_aih_13)
+mono_test(ppp_result_aih_14)
+mono_test(ppp_result_aih_15)
+mono_test(ppp_result_aih_16)
+mono_test(ppp_result_aih_17)
+mono_test(ppp_result_aih_18)
+mono_test(ppp_result_aih_19)
+mono_test(ppp_result_aih_20)
+
+
+
+####################Chapter 5############################
+#### inequality analysis of cprd data
+
+### extracting clinical records from aurum data
+clinical_extract_aurum<- function(n,path){
+  data<- data.frame(matrix(nrow=0, ncol = length(col_names_clinical_aurum)))
+  #columns<-colnames(therapy_3)
+  colnames(data) = col_names_clinical_aurum
+  file_n<-NULL
+  for(i in 1:n)
+  {
+    
+    file_n[i]<- paste(path,"_",sprintf("%03d",i),sep="")
+    file_n[i]<- paste(file_n[i],".txt",sep="")
+    observation<- read.table(file=file_n[i],fill=TRUE,header=TRUE)
+    
+    observation$obsdate<-dmy(observation$obsdate) 
+    observation$enterdate<-dmy(observation$enterdate) 
+    medcode_aurum<-  medcode_aurum[,c('medcodeid')]
+    
+    observation<- inner_join(observation,medcode_aurum,by=c("parentobsid"="medcodeid"))
+    #observation<- observation %>% filter(observation$parentobsid  %in% MedCodeId_aurum)
+    data<- rbind(data,observation)
+    
+  }
+  return(data)
+  #return(file_n)
+}
+observation_ex_au_2<- clinical_extract_aurum(33,"Alc_20_000126_Aurum_2_Extract\\Observation\\Alc_20_000126_Aurum_2_Extract_Observation")
+observation_ex_au_3<- clinical_extract_aurum(131,"Alc_20_000126_Aurum_3b_Extract\\Alc_20_000126_Arm_3b_Extract\\Observation\\Alc_20_000126_Arm_3b_Extract_Observation")
+observation_ex_au_4<- clinical_extract_aurum(138,"Alc_20_000126_Aurum_4_Extract\\Alc_20_000126_Arm_4_Extract\\Observation\\Alc_20_000126_Arm_4b_Extract_Observation")
+observation_ex_au_5<- clinical_extract_aurum(90,"Alc_20_000126_Aurum_5_Extract\\Observation\\Alc_20_000126_Aurum_5b_Extract_Observation")
+observation_ex_au_6<- clinical_extract_aurum(92,"Alc_20_000126_Aurum_6_Extract\\Observation\\Alc_20_000126_Aurum_6_Extract_Observation")
+observation_ex_au_7<- clinical_extract_aurum(150,"Alc_20_000126_Aurum_7_Extract\\Observation\\Alc_20_000126_Aurum_7_Extract_Observation")
+observation_ex_au_8<- clinical_extract_aurum(85,"Alc_20_000126_Aurum_8_Extract\\Alc_20_000126_Arm_8_Extract\\Observation\\Alc_20_000126_Aurum_8_Extract_Observation")
+observation_ex_au_9<- clinical_extract_aurum(146,"Alc_20_000126_Aurum_9_Extract\\Alc_20_000126_Arm_9_Extract\\Observation\\Alc_20_000126_Arm_9_Obs_Extract_Observation")
+observation_ex_au_10<- clinical_extract_aurum(145,"Alc_20_000126_Aurum_10_Extract\\Alc_20_000126_Arm_10_Extract\\Observation\\Alc_20_000126_Arm_10_Obs_Extract_Observation")
+observation_ex_au_12<- clinical_extract_aurum(135,"Alc_20_000126_Aurum_12_Extract\\Observation\\Alc_20_000126_Aurum_12c_Extract_Observation")
+observation_ex_au_13<- clinical_extract_aurum(142,"Alc_20_000126_Aurum_13_Extract\\Observation\\Alc_20_000126_Aurum_13b_Extract_Observation")
+write.xlsx(observation_ex_au_13,file="observation_ex_au_13.xlsx")
+observation_ex_au_14<- clinical_extract_aurum(130,"Alc_20_000126_Aurum_14_Extract\\Observation\\Alc_20_000126_Aurum_14_Ob_Extract_Observation")
+observation_ex_au_11<-clinical_extract_aurum(130,"Alc_20_000126_Aurum_11_Extract\\Observation\\Alc_20_000126_Aurum_11c_Extract_Observation")
+observation_ex_au_15<- clinical_extract_aurum(86,"Alc_20_000126_Aurum_15_Extract\\Observation\\Alc_20_000126_Aurum_15c_Extract_Observation")
+observation_ex_au_16<- clinical_extract_aurum(88,"Alc_20_000126_Aurum_16_Extract\\Observation\\Alc_20_000126_Aurum_16_Extract_Observation")
+observation_ex_au_17<- clinical_extract_aurum(132,"Alc_20_000126_Aurum_17_Extract\\Observation\\Alc_20_000126_Aurum_17c_Extract_Observation")
+observation_ex_au_18<- clinical_extract_aurum(11,"Alc_20_000126_Aurum_18_Extract\\Observation\\Alc_20_000126_Aurum_18c_Extract_Observation")
+
+### extracting  clinical records from GOLD data 
+
+clinical_extract<- function(n,path){
+  data<- data.frame(matrix(nrow=0, ncol = 10))
+  #columns<-colnames(therapy_3)
+  colnames(data) = col_names_clinical
+  file_n<-NULL
+  for(i in 1:n)
+  {
+    
+    file_n[i]<- paste(path,"\\Clinical\\",path,"_Clinical_0",sprintf("%02d",i),sep="")
+    file_n[i]<- paste(file_n[i],".txt",sep="")
+    clinical<- read.table(file=file_n[i],fill=TRUE,header=TRUE)
+    
+    clinical$eventdate<-dmy(clinical$eventdate) 
+    clinical$sysdate<-dmy(clinical$sysdate) 
+    
+    #therapy<-  therapy[therapy$prodcode %in% drug_prodcode,] 
+    medcode_clinical<- medcode_clinical[,c("medcode")]
+    clinical<- inner_join(clinical,medcode_clinical,by=c("medcode"))
+    #therapy<- inner_join(therapy,drug_prodcode,by=c("prodcode"))
+    data<- rbind(data,clinical)
+    
+  }
+  return(data)
+  #return(file_n)
+}
+clinical_ex_1<- clinical_extract(12,"Alc_20_000126_GOLD_1_Extract")
+clinical_ex_2<- clinical_extract(32,"Alc_20_000126_GOLD_2_Extract")
+clinical_ex_3<- clinical_extract(12,"Alc_20_000126_GOLD_3_Extract")
+clinical_ex_4<- clinical_extract(32,"Alc_20_000126_GOLD_4_Extract")
+clinical_ex_5<- clinical_extract(30,"Alc_20_000126_GOLD_5_Extract")
+clinical_ex_6<- clinical_extract(34,"Alc_20_000126_GOLD_6_Extract")
+clinical_ex_7<- clinical_extract(20,"Alc_20_000126_GOLD_7_Extract")
+
+### primary care records 
+primary_care<- rbind(clinical_gold,observation)
+primary_care$year<- year(primary_care$eventdate)
+primary_care <- primary_care %>% filter(year>1999)
+primary_care <- primary_care %>% filter(country=='England')
+
+### patients records
+
+patients_au <- read.delim("J:/HW/HEHTA/CPRDalcohol/Data/denominator files/202205_CPRDAurum/202205_CPRDAurum_AcceptablePats.txt")
+patients_gold <- read.delim("J:/HW/HEHTA/CPRDalcohol/Data/denominator files/Denominators_2022_05/acceptable_pats_from_utspracts_2022_05.txt")
+patients_au<- patients_au[,c('patid','yob','mob','gender','regstartdate','cprd_ddate','regenddate')]
+patients_gold<- patients_gold[,c('patid','yob','mob','gender','crd','deathdate','tod')]
+names(patients_gold)[names(patients_gold)=='crd']<-'regstartdate'
+names(patients_au)[names(patients_au)=='cprd_ddate']<-'deathdate'
+names(patients_gold)[names(patients_gold)=='tod']<-'enddate'
+names(patients_au)[names(patients_au)=='regenddate']<-'enddate'
+patients<- rbind(patients_gold,patients_au)
+patients$regstartdate<- dmy(patients$regstartdate)
+patients$deathdate<- dmy(patients$deathdate)
+patients$year_1<- year(patients$regstartdate)
+patients$enddate<- dmy(patients$enddate)
+patients$year_end<-year(dmy(patients$enddate))
+patients$year_d<- year(patients$deathdate)
+patients<- patients %>% filter(year_1>1939 & year_1<2019) ### exclude the patients with abnormal register date
+patients<- patients %>% filter(yob>1910 & yob<1992) ### exclude the patients with abnormal birth date
+patients<- patients  %>% filter(country=='England')
+r_end<-patients%>%  group_by(year_end) %>% summarise(n()) 
+r_new<-patients%>%  group_by(year_1) %>% summarise(n())
+r_death<-patients%>%  group_by(year_d) %>% summarise(n())
+
+
+## link the patients with primary care records
+### Building primyar care cohort
+primary_care_cohort <- primary_care %>% group_by(patid) %>% arrange(patid,eventdate) %>% mutate(w_2010=ifelse(year>2009,1,0))
+t_1<- (primary_care_cohort[,c('patid','eventdate','year','w_2010')]) %>%
+t_1<- primary_care_cohort %>% group_by(patid) %>% slice(which.min(year))
+t_1<- t_1  %>% filter(year>2009)  %>% distinct()
+t<- primary_care_cohort
+t <- t %>% group_by(patid) %>% mutate(sum=sum(w_2010))
+t <- t%>% filter(sum>0) ## need to have records after 2010;
+t <- t %>% group_by(patid) %>%  arrange(patid,eventdate) %>% mutate(ord=order((eventdate)))%>%mutate(cnt=max(ord))
+
+t<- t %>% group_by(patid) %>%filter(sum(w_2010)!=length(w_2010))  ### and need records before 2010;
+
+require(RcppRoll)
+t <- t %>%  group_by(patid) %>% mutate(rs=roll_sum(w_2010,2,align = "right", fill = NA))  ## calculate the sum of nearest pair of  w_2010 to detect the position of  records before/after 2010 
+t <- t %>% filter(rs %in% c(1,0)) #### extract the patients with such conversion 
+t <- t%>% group_by(patid) %>% mutate(diff=year-lag(year,1)) ### calculate the time difference these two years
+t<- t %>% filter((rs==1&is.na(diff))|(rs==1&diff>10))  
+t<-t [,c('patid','eventdate','year','e2015_imd_10')]
+t_1<-t_1 [,c('patid','eventdate','year','e2015_imd_10')]
+patients_<- rbind(t,t_1)
+patients$gender<- as.character(patients$gender)
+patients$gender<-ifelse(patients$gender=='1','Male',ifelse(patients$gender=='M','Male',ifelse(patients$gender=='2','Female',ifelse(patients$gender=='F','Female',NA))))
+patients_<- inner_join(patients_,patients,by=c('patid'))
+patients_$age<- patients_$year-patients_$yob
+patients_ <- patients_  %>% filter(age>=18&age<=99)
+patients_<- patients_ %>% filter(deathdate<eventdate)
+## primary care patients link to prescriptions
+
+### CCI_HOSP
+hes_diagnosis_hosp<- read.table(file="Linked data\\20_000126_GOLD1\\hes_diagnosis_hosp_20_000126_DM.txt",fill = TRUE,header=TRUE,colClasses = c(spno='NULL',icdx='NULL',discharged='NULL'))
+hes_dia_hosp_au<- read.table(file="Linked data\\20_000126_Aurum1\\hes_diagnosis_hosp_20_000126_DM.txt",fill=TRUE,header=TRUE, colClasses = c(spno='NULL',ICDx='NULL',discharged='NULL'))
+hes_record_1<- inner_join(hes_diagnosis_hosp,test,by=c('patid')) 
+hes_record_1$admidate<-dmy(hes_record_1$admidate)
+hes_record_1<- hes_record_1 %>% filter(eventdate> admidate)
+hes_record_2<- inner_join(hes_dia_hosp_au,test,by=c('patid')) 
+hes_record_2$admidate<-dmy(hes_record_2$admidate)
+hes_record_2 <- hes_record_2 %>% filter(eventdate> admidate)
+cci_1 <- comorbidity(x = hes_record_1, id = "patid", code = "icd", map = "charlson_icd10_quan", assign0 = FALSE,tidy.codes = TRUE)
+cci_1$cci_hosp<- rowSums(cci_1[,2:18])
+cci_1<- cci_1[,c('patid','cci_hosp')]
+names(hes_record_2)[names(hes_record_2)=='ICD']='icd'
+cci_2 <- comorbidity(x = hes_record_2, id = "patid", code = "icd", map = "charlson_icd10_quan", assign0 = FALSE,tidy.codes = TRUE)
+cci_2$cci_hosp<- rowSums(cci_2[,2:18])
+cci_2<- cci_2[,c('patid','cci_hosp')]
+cci_hosp<- rbind(cci_1,cci_2[,c('patid','cci_hosp')])
+### extract imd records(from linked data)
+
+gp_imd_au <- read.delim("J:/HW/HEHTA/CPRDalcohol/Data/Linked data/20_000126_Aurum2/practice_imd_20_000126.txt")
+gp_imd_gold <- read.delim("J:/HW/HEHTA/CPRDalcohol/Data/Linked data/20_000126_GOLD2/practice_imd_20_000126.txt")
+gp_imd<-rbind(gp_imd_au,gp_imd_gold)
+linkeage_au<- read.table(file="Linked data\\20_000126_Aurum1\\20_000126_linkage_eligibility_aurum_set18.txt",fill = TRUE,header=TRUE)
+linkeage_gold<- read.table(file="Linked data\\20_000126_GOLD1\\20_000126_linkage_eligibility_gold_set18.txt",fill = TRUE,header=TRUE)
+linkage_data<- rbind(linkeage_gold,linkeage_au)
+linkage_data<- linkage_data[,c(1,2)]
+patients_<- left_join(patients_,linkage_data,by=c('patid')) 
+patients_<- left_join(patients_,gp_imd,by=c('pracid'))
+
+### exclude the patietns with hosp before 
+patients_hosp_b<- inner_join(patients_,hes_hosp,by=c('patid'))  %>% filter(admidate< eventdate)
+patients_hosp_b<- (unique(patients_hosp_b$patid))  #### patient with hosp before
+patients_1<- patients_[!(patients_$patid  %in% patients_hosp_b),]
+patients_1<- patients_ %>% filter(year<2020)
+### link patient informationto prescription data
+patients_1<- left_join(patients_1,drug,by=c('patid')) 
+patients_1<- model_1_4_largers[,c(1:11)]  %>% distinct()
+patients_1$eventdate<-ymd(patients_1$eventdate)
+drug$prescdate<- ymd(drug$prescdate)
+test<- left_join(patients_1,drug,by=c('patid'))  
+test<-test %>% mutate(diff=ymd(prescdate)-ymd(eventdate))
+test$diff<-  as.numeric(test$diff)
+test_no_p<- test[is.na(test$drugsubstancename),]  %>% distinct()
+test_p<- test[!is.na(test$drugsubstancename)&test$diff>=0, ] %>% group_by(patid) %>% slice_min(prescdate)  %>% distinct()
+test_p<- test_p  %>% group_by(patid,prescdate) %>%  mutate(n=n())  %>% filter(n==1)
+test_p<- select(test_p,-c('n'))
+test_1<- test[test$drugsubstancename!='Nalmefene hydrochloride',]
+test_ex_b_a<- unique(test_1[test_1$diff<0 &test_1$diff>=-60&test_1$drugsubstancename=='Acamprosate calcium',]$patid)#### before 60days and acamprosate
+test_ex_b_a_1<- unique(test_1[test_1$diff<0 &test_1$drugsubstancename=='Acamprosate calcium',]$patid)#### before 60days and acamprosate
+test_p_1<- test_p[test_p$drugsubstancename!='Nalmefene hydrochloride',]
+test_ex_a<- unique(test_p_1[test_p_1$diff>=0&test_p_1$diff<=60&test_p_1$drugsubstancename=='Acamprosate calcium',]$patid) ### after and had acamprosate
+test_ex_a_1<- unique(test_p_1[test_p_1$diff>=0&test_p_1$drugsubstancename=='Acamprosate calcium',]$patid) ### after and had acamprosate
+
+test_ex<- unique(test_1[test_1$diff<0&test_1$diff>=-60&!is.na(test_1$diff),]$patid) ####  
+test_ex_1<- unique(test_1[test_1$diff<0,]$patid)
+test_ex_2<-unique(test_1[test_1$diff>=0&test_1$diff<=60,]$patid)
+test_ex_3<-unique(test_1[test_1$diff>=0,]$patid)
+test_<- rbind(test_no_p,test_p_1)  %>% distinct()
+test_$pb_60<-  ifelse(test_$patid %in% test_ex,1,0)
+test_$pb<-  ifelse(test_$patid %in% test_ex_1,1,0)
+test_$p_60<- ifelse(test_$patid  %in% test_ex_2,1,0)
+test_$p_a<-ifelse(test_$patid  %in% test_ex_3,1,0)
+names(test_)[names(test_)=='e2015_imd_10']<-'imd'
+
+test_$imd_q<- ifelse(test_$imd %in% c(1,2),'1st',ifelse(test_$imd %in% c(3,4),'2nd',ifelse(test_$imd %in% c(5,6),'3rd',ifelse(test_$imd %in% c(7,8),'4th','5th'))))
+cci_hosp<- model_1_4_largers[,c('patid','cci','cci_1')]  %>% distinct()
+test_<-inner_join(test_,cci_hosp,by=('patid'))
+test_ <- test_ %>% distinct()
+write.xlsx(test_,'model_1_4.xlsx',overwrite=TRUE)
+
+test_5<- test_ [test_$p_60==1,] 
+test_5$p_a<-ifelse(test_5$patid %in% test_ex_a,1,0)
+test_5$p_b_a <- ifelse(test_5$pb_60==0, 'no prescription before',ifelse(test_5$patid %in% test_ex_b_a,'acamprosate before','disulfiram before'))
+write.xlsx(test_5,'model_5.xlsx',overwrite=TRUE)
+
+test_6<- test_ [test_$p_a==1,]  #### with prescription ever after diagnosis.
+test_6$p_a_1<-ifelse(test_6$patid %in% test_ex_a_1,1,0)
+test_6$p_b_a_1 <- ifelse(test_6$pb==0, 'no prescription before',ifelse(test_6$patid %in% test_ex_b_a_1,'acamprosate before','disulfiram before'))
+
+table(model_1_4_largers$gender)
+table(model_1_4_largers$imd_q)
+table(model_1_4_largers$cci_1)
+sd(test_$age)
+table(model_1_4_largers[model_1_4_largers$drugsubstancename=='Disulfiram',]$gender)
+table(model_1_4_largers[model_1_4_largers$drugsubstancename=='Disulfiram',]$imd_q)
+table(model_1_4_largers[model_1_4_largers$drugsubstancename=='Disulfiram',]$cci_1)
+table(model_1_4_largers[model_1_4_largers$drugsubstancename=='Acamprosate calcium',]$gender)
+table(model_1_4_largers[model_1_4_largers$drugsubstancename=='Acamprosate calcium',]$imd_q)
+table(model_1_4_largers[model_1_4_largers$drugsubstancename=='Acamprosate calcium',]$cci_1)
+table(model_1_4_largers[model_1_4_largers$p_a==0,]$gender)
+table(model_1_4_largers[model_1_4_largers$p_a==0,]$imd_q)
+table(model_1_4_largers[model_1_4_largers$p_a==0,]$cci_1)
+table(model_1_4_largers[model_1_4_largers$p_a==1,]$gender)
+table(model_1_4_largers[model_1_4_largers$p_a==1,]$imd_q)
+table(model_1_4_largers[model_1_4_largers$p_a==1,]$cci_1)
+summary(model_1_4_largers[model_1_4_largers$p_a==1,]$age)
+summary(model_1_4_largers[model_1_4_largers$p_a==0,]$age)
+summary(model_1_4_largers[model_1_4_largers$drugsubstancename=='Acamprosate calcium',]$age)
+summary(model_1_4_largers[model_1_4_largers$drugsubstancename=='Disulfiram',]$age)
+sd(model_1_4_largers[model_1_4_largers$p_a==1,]$age)
+sd(model_1_4_largers[model_1_4_largers$p_a==0,]$age)
+sd(model_1_4_largers[model_1_4_largers$drugsubstancename=='Acamprosate calcium'&model_1_4_largers$p_a==1,]$age)
+sd(model_1_4_largers[model_1_4_largers$drugsubstancename=='Disulfiram'&model_1_4_largers$p_a==1,]$age)
+model_1_4_largers<- read_xlsx('model_1_4_larger.xlsx')
+t1<-as.data.frame(model_1_4_largers  %>%  group_by(year) %>% summarise(n()))
+t1<-as.data.frame(model_1_4_largers[model_1_4_largers$p_60==1,]  %>%  group_by(year) %>% summarise(n()))
+
+t2<-as.data.frame(model_1_4_largers [model_1_4_largers$imd_q=='1st'&model_1_4_largers$p_60==1,] %>%  group_by(year) %>% summarise(n()))
+t3<-as.data.frame(model_1_4_largers [model_1_4_largers$imd_q=='5th'&model_1_4_largers$p_60==1,] %>%  group_by(year) %>% summarise(n()))
+merge(t1,t2,t3,by=c('year'))
+
+length(model_1_4_largers[!is.na(model_1_4_largers$drugsubstancename),]$gender)
+table(model_1_4_largers[!is.na(model_1_4_largers$drugsubstancename),]$imd_q)
+table(model_1_4_largers[!is.na(model_1_4_largers$drugsubstancename),]$cci)
+summary(model_1_4_largers[is.na(model_1_4_largers$drugsubstancename),]$age)
+sd(model_1_4[!is.na(model_1_4$patid)&is.na(model_1_4$drugsubstancename),]$age)
+summary(model_1_4[model_1_4$drugsubstancename=='Acamprosate calcium',]$age)
+summary(model_1_4[model_1_4$drugsubstancename=='Disulfiram',]$age)
+sd(!is.na(model_1_4$age))
+
+fit_<- glm(p_60~gender +imd_q+cci_1+pb_60,data=test_,family=binomial("logit"))
+cbind(round(exp(summary(fit_)$coef[,c(1:2)]),4),round(summary(fit_)$coef[,c(4)],4))
+## model 1 to model 6, Table 11 in chapter 5
+fit_1<- glm(p_60~gender +imd_q+cci_1+pb_60,data=test_,family=binomial("logit"))
+fit_2<- glm(p_a~gender +imd_q+cci_1+pb,data=test_,family=binomial("logit"))
+fit_3<- glm(pb~gender +imd_q+cci_1,data=test_,family=binomial("logit"))
+fit_4<- glm(pb_60~gender +imd_q+cci_1,data=test_,family=binomial("logit"))
+fit_5<- glm(p_a~gender+cci_1+imd_q+p_b_a,data=test_5,family = 'binomial')
+fit_6<- glm(p_a_1~gender+cci+imd_q+p_b_a_1,data=test_6,family = 'binomial')
+
+cbind(round(exp(summary(fit_1)$coef[,c(1:2)]),4),round(summary(fit_1)$coef[,c(4)],4))
+cbind(round(exp(summary(fit_2)$coef[,c(1:2)]),4),round(summary(fit_2)$coef[,c(4)],4))
+cbind(round(exp(summary(fit_3)$coef[,c(1:2)]),4),round(summary(fit_3)$coef[,c(4)],4))
+cbind(round(exp(summary(fit_4)$coef[,c(1:2)]),4),round(summary(fit_4)$coef[,c(4)],4))
+
+
+### CER PIS part### 
+
+drug_1<- read_dta("PIS_2010_.dta")
+drug_2<- read_dta("PIS_2011_.dta")
+drug_3<- read_dta("PIS_2012_.dta")
+drug_4<- read_dta("PIS_2013_.dta")
+drug_5<- read_dta("PIS_2014_.dta")
+drug_6<- read_dta("PIS_2015_.dta")
+drug_7<- read_dta("PIS_2016_.dta")
+drug_8<- read_dta("PIS_2017_.dta")
+drug_9<- read_dta("PIS_2018_.dta")
+drug_10<- read_dta("PIS_2019_.dta")
+
+drugs<-rbind(drug_4,drug_5,drug_6,drug_7,drug_8,drug_9,drug_10)
+drugs<- drugs[drugs$pibnfrootdrugdescription %in% new_cohort$Drugs,]
+drugs<- drugs[,c('patientid','prescriberprofessionalnoanon','pibnfrootdrugdescription','prescdate')]
+drugs$txA<-ifelse(drugs$pibnfrootdrugdescription=='ACAMPROSATE CALCIUM',1,0)
+names(drugs)[names(drugs)=='pibnfrootdrugdescription']<-'Drugs'
+names(drugs)[names(drugs)=='prescriberprofessionalnoanon']<-'prescriber'
+drugs$prescdate<- ymd(drugs$prescdate)
+drugs<- drugs[year(drugs$prescdate)>2012,]
+drugs<- drugs %>% filter(pibnfrootdrugdescription %in% c('ACAMPROSATE CALCIUM','DISULFIRAM'))
+charlson_dset <- charlson_dset %>% subset(select=c("patientid","charlindex10yr"))
+newe_cohort<- drugs %>% group_by(patientid) %>% slice(which.min(prescdate))
+new_cohort<- new_cohort %>% subset(select=c("patientid","age_paid_date","pibnfrootdrugdescription","sex","prescdate_","Event_date_","simd","time",'prescriberprofessionalnoanon'))
+new_cohort<- left_join(new_cohort,charlson_dset,by=c("patientid"))
+new_cohort$patgendercode<- factor(new_cohort$sex,levels = c(1,0),labels = c("Male","Female"))
+new_cohort$prescdate_<- ymd(new_cohort$prescdate_)
+names(new_cohort)[names(new_cohort)=='prescdate_']<-'prescdate'
+new_cohort$charlindex10yr<- ifelse(is.na(new_cohort$charlindex10yr),0,new_cohort$charlindex10yr)
+new_cohort$hosp<-ifelse(is.na(new_cohort$Event_date_),0,1)
+new_cohort$hosp<- as.character(new_cohort$hosp)
+names(new_cohort)[names(new_cohort)=="age_paid_date"]<-'Age'
+names(new_cohort)[names(new_cohort)=='patgendercode']<-'Gender'
+names(new_cohort)[names(new_cohort)=='pibnfrootdrugdescription']='Drugs'
+
+### descriptive statistics
+label(new_cohort$patgendercode)<-"Gender"
+label(new_cohort$age_paid_date)<-"Age (years)"
+label(new_cohort$Drugs)<-"Drug"
+label(new_cohort$prescyear)<-"Prescription Year"
+label(new_cohort$charlindex10yr)<- "Charlson Comorbidity Index"
+label(new_cohort$simd2012_sc_decile)<-"SIMD_2012"
+label(new_cohort$simd2016_sc_decile)<- "SIMD_2016"
+table1(~patgendercode+age_paid_date+prescyear+charlindex10yr+simd2012_sc_decile+simd2016_sc_decile+death+hosp|Drugs,render.continuous=c(.="Mean(SD)"),data=new_cohort)
+drugs$prescdate<-ymd(drugs$prescdate)
+new_cohort$prescdate<- ymd(new_cohort$prescdate)
+drugs_<- drugs_[,c('patientid','prescdate','prescriberprofessionalnoanon','pibnfrootdrugdescription')]
+drugs_<- drugs_[drugs_$pibnfrootdrugdescription %in% c('ACAMPROSATE CALCIUM','DISULFIRAM'),]
+names(new_cohort)[names(new_cohort)=='pibnfrootdrugdescription']='Drugs'
+names(new_cohort)[names(new_cohort)=='prescriberprofessionalnoanon']<-'prescriber'
+names(drugs_)[names(drugs_)=='prescriberprofessionalnoanon']<-'prescriber' 
+cohort<- select(cohort,-txA)
+##constructing PPP IV
+ppp_function<-function(drugs,cohort,n){
+  cohort <<- cohort %>% distinct()
+  # drugs$txA<- ifelse(drugs$pibnfrootdrugdescription=='ACAMPROSATE CALCIUM',1,0)
+  linked<-  left_join(cohort,drugs,by=c("prescriber"))%>% filter(prescdate.x>prescdate.y)
+  linked<- linked %>% mutate(timediff=prescdate.x-prescdate.y)
+  #  linked<- linked %>% filter(timediff<366)
+  linked<- linked%>% group_by(prescriber,prescdate.x)%>% mutate(ppp_p=round(sum(txA)/n(),3))
+  linked<- linked%>% group_by(prescriber,prescdate.x)%>% arrange(prescriber, prescdate.y) %>% mutate(ord=order(desc(prescdate.y)))%>% mutate(cnt=max(ord))%>%filter(ord<n+1) 
+  linked<- linked %>%group_by(prescriber,prescdate.x)%>% mutate(ppp=sum(txA))
+  
+  linked<- linked %>% subset(select=c("prescriber","prescdate.x","ppp",'ppp_p'))%>% distinct()
+  names(linked)[names(linked)=='prescdate.x']<-'prescdate'
+  data<- left_join(cohort,linked,by=c("prescriber","prescdate"))%>%distinct()
+  names(data)[names(data)=='Age']<-'age'
+  names(data)[names(data)=="Gender"]<-'gender'
+  
+  data$charlson_index<-ifelse(data$charlindex10yr==0,'0',ifelse(data$charlindex10yr==1,'1',ifelse(data$charlindex10yr==2,'2',ifelse(data$charlindex10yr==3,'3','4'))))
+  data<- data %>% filter(age>17)
+  
+  data$age_group<- cut(data$age,breaks=c(18,40,50,60,70,100),labels = c('18-39 yrs','40-49 yrs','50-59 yrs','60-69yrs','Older than 70 yrs'),right=FALSE)
+  
+  # data$hosp<-ifelse(!is.na(data$admission_date_),1,0)
+  data$timediff_hosp<-data$time
+  return(data)
+}
+
+ppp_1<- ppp_function(drugs,cohort,10)
+summary(ivreg(hosp~txA+age_group+gender+charlson_index+simd2016_sc_decile+factor(prescyear)|pp_1+age_group+gender+charlson_index+simd2016_sc_decile+factor(prescyear),data=ppp_1),diagnostic=TRUE)
+ppp_1$pp_1<- ifelse(ppp_1$ppp_p>summary(ppp_1$ppp_p)[3],1,0)
+nrow(ppp_1[ppp_1$txA==ppp_1$pp_1,])/nrow(ppp_1[!is.na(ppp_1$ppp),])
+
+data<- ppp_1[!is.na(ppp_1$ppp),]
+names(data)[names(data)==' Drugs']<-'Drugs'
+fit.r<-  glm(txA~ppp_p+age+gender+as.factor(simd)+charlson_index,data=data,family=binomial("logit"))
+data$r_<-residuals(fit.r,type="working")
+fit_iv<-  coxph(Surv(timediff_hosp,as.numeric(hosp))~Drugs+age+gender+as.factor(simd)+charlson_index+r_,data=data)
+summary(fit_iv)
+
+#### validation of monotonicity assumption, Table 8 in supplementary material 
+xt<- xtabs(~txA+hosp+pp_1,data=ppp_1)
+p<- prop.table(xt,margin=3)
+summary(bpbounds(p))
+xt<- xtabs(~txA+death+pp_1,data=ppp_1)
+p<- prop.table(xt,margin=3)
+summary(bpbounds(p))
+
+### CER CPRD part
+### primary data
+therapy_ex_au_1<- read.xlsx("alc_therapy_aurum\\therapy_ex_au_1.xlsx")
+therapy_ex_au_2<- read.xlsx("alc_therapy_aurum\\therapy_ex_au_2.xlsx")
+therapy_ex_au_3<- read.xlsx("alc_therapy_aurum\\therapy_ex_au_3.xlsx")
+therapy_ex_au_4<- read.xlsx("alc_therapy_aurum\\therapy_ex_au_4.xlsx")
+therapy_ex_au_5<- read.xlsx("alc_therapy_aurum\\therapy_ex_au_5.xlsx")
+therapy_ex_au_6<- read.xlsx("alc_therapy_aurum\\therapy_ex_au_6.xlsx")
+therapy_ex_au_7<- read.xlsx("alc_therapy_aurum\\therapy_ex_au_7.xlsx")
+therapy_ex_au_8<- read.xlsx("alc_therapy_aurum\\therapy_ex_au_8.xlsx")
+therapy_ex_au_9<- read.xlsx("alc_therapy_aurum\\therapy_ex_au_9.xlsx")
+therapy_ex_au_10<- read.xlsx("alc_therapy_aurum\\therapy_ex_au_10.xlsx")
+therapy_ex_au_11<- read.xlsx("alc_therapy_aurum\\therapy_ex_au_11.xlsx")
+therapy_ex_au_12<- read.xlsx("alc_therapy_aurum\\therapy_ex_au_12.xlsx")
+therapy_ex_au_13<- read.xlsx("alc_therapy_aurum\\therapy_ex_au_13.xlsx")
+therapy_ex_au_14<- read.xlsx("alc_therapy_aurum\\therapy_ex_au_14.xlsx")
+therapy_ex_au_15<- read.xlsx("alc_therapy_aurum\\therapy_ex_au_15.xlsx")
+therapy_ex_au_16<- read.xlsx("alc_therapy_aurum\\therapy_ex_au_16.xlsx")
+therapy_ex_au_17<- read.xlsx("alc_therapy_aurum\\therapy_ex_au_17.xlsx")
+therapy_ex_au_18<- read.xlsx("alc_therapy_aurum\\therapy_ex_au_18.xlsx")
+
+therapy_au<- rbind(therapy_ex_au_1,therapy_ex_au_2,therapy_ex_au_3,therapy_ex_au_4,therapy_ex_au_5,therapy_ex_au_6,therapy_ex_au_7,therapy_ex_au_8,therapy_ex_au_9,therapy_ex_au_10,therapy_ex_au_11,therapy_ex_au_12,therapy_ex_au_13,therapy_ex_au_14,therapy_ex_au_15,therapy_ex_au_16,therapy_ex_au_17,therapy_ex_au_18)
+therapy_au$issuedate<- convertToDate(therapy_au$issuedate)
+drug_code_aurum<- read_excel("alc_therapy_extract\\drug_code_aurum.xlsx",1)
+drug_code_aurum$ProdCodeId<- as.character(drug_code_aurum$ProdCodeId)
+therapy_au<-inner_join(therapy_au,drug_code_aurum,by=c("prodcodeid"="ProdCodeId"))
+therapy_au<- therapy_au[therapy_au$drugsubstancename %in% c("Acamprosate calcium","Disulfiram"),]
+therapy_au<-therapy_au[,c(1,8,6,18,10,11)]
+names(therapy_au)[names(therapy_au)=="issuedate"]<- 'prescdate'
+therapy_au$prescdate<- convertToDate(therapy_au$prescdate)
+
+
+
+therapy_gold_1_dependence<- read_excel("alc_therapy_extract\\therapy_ex_1_dependence.xlsx")
+therapy_gold_2_dependence<- read_excel("alc_therapy_extract\\therapy_ex_2_dependence.xlsx")
+therapy_gold_3_dependence<- read_excel("alc_therapy_extract\\therapy_ex_3_dependence.xlsx")
+therapy_gold_4_dependence<- read_excel("alc_therapy_extract\\therapy_ex_4_dependence.xlsx")
+therapy_gold_5_dependence<- read_excel("alc_therapy_extract\\therapy_ex_5_dependence.xlsx")
+therapy_gold_6_dependence<- read_excel("alc_therapy_extract\\therapy_ex_6_dependence.xlsx")
+therapy_gold_7_dependence<- read_excel("alc_therapy_extract\\therapy_ex_7_dependence.xlsx")
+therapy_gold_dependence<- rbind(therapy_gold_1_dependence,therapy_gold_2_dependence,therapy_gold_3_dependence,therapy_gold_4_dependence,therapy_gold_5_dependence,therapy_gold_6_dependence,therapy_gold_7_dependence)
+drug_code_dependence<- read_excel("drug_dependence.xlsx",1)
+drug_code<- read_excel("alc_therapy_extract\\drug_code.xlsx",1)
+drugcode<- rbind(read_excel("drug_dependence.xlsx",1),read_excel("alc_therapy_extract\\drug_code.xlsx",1))%>% distinct()
+therapy_gold_dependence<- inner_join(therapy_gold_dependence,drugcode,by=c("prodcode"))
+therapy_gold_dependence<- therapy_gold_dependence[therapy_gold_dependence$drugsubstancename %in% c("Acamprosate calcium","Disulfiram"),]
+therapy_gold_dependence<- therapy_gold_dependence[,c(1,6,2,18,7,9)]
+names(therapy_gold_dependence)[names(therapy_gold_dependence)=="eventdate"]<- 'prescdate'
+names(therapy_gold_dependence)[names(therapy_gold_dependence)=='qty']<-'quantity'
+dosage_lookup_gold<- fread("common_dosages_gold.txt",select=c("dosageid",'dosage_text','daily_dose'))
+dosage_lookup_gold<- fread("common_dosages_gold.txt")
+dosage_lookup_au<- fread("common_dosages_au.txt",select=c("dosageid",'dosage_text','daily_dose'))
+dosage_lookup<- rbind(dosage_lookup_au,dosage_lookup_gold)
+drugs<- rbind(therapy_gold_dependence,therapy_au)
+
+##  patients
+patients_au <- read.delim("J:/HW/HEHTA/CPRDalcohol/Data/denominator files/202205_CPRDAurum/202205_CPRDAurum_AcceptablePats.txt")
+patients_gold <- read.delim("J:/HW/HEHTA/CPRDalcohol/Data/denominator files/Denominators_2022_05/acceptable_pats_from_utspracts_2022_05.txt")
+patients_au<- patients_au[,c('patid','yob','mob','gender','regstartdate','cprd_ddate','regenddate')]
+patients_gold<- patients_gold[,c('patid','yob','mob','gender','crd','deathdate','tod')]
+names(patients_gold)[names(patients_gold)=='crd']<-'regstartdate'
+names(patients_au)[names(patients_au)=='cprd_ddate']<-'deathdate'
+names(patients_gold)[names(patients_gold)=='tod']<-'enddate'
+names(patients_au)[names(patients_au)=='regenddate']<-'enddate'
+patients<- rbind(patients_gold,patients_au)
+
+
+### Building cohort for the CER part (CPRD data)
+cohort_big<- drug %>% slice(which.min(drug$prescdate))
+cohort_big<- left_join(cohort_big,cci_hosp,by=c('patid'))
+cohort_big<- left_join(cohort_big,linkage_data,by=c('patid'))
+cohort_big<- left_join(cohort_big,gp_imd,by=c('pracid'))
+cohort<- cohort_big[cohort_big$country=='England'&!is.na(cohort_big$country),]
+cohort_1<- subset(drug,drug$patid %in% cohort$patid)
+t<- left_join(cohort_1,hes_hosp,by=c('patid'))
+t<- t%>% mutate(diff=ymd(prescdate)-ymd(admidate) )
+t <- t %>% group_by(patid) %>% arrange(patid,diff)
+t$i_1825<- ifelse(!is.na(t$diff)&t$diff>0&t$diff<1825,1,0)
+t<- t %>% group_by(patid) %>% mutate(sum_1825=sum(i_1825))
+t<- t %>% filter(sum_1825==0) ### only keep patients without hospitalisation back  five years
+length(unique(t$patid))
+t$i_history<- ifelse(is.na(t$diff)|t$diff<0,0,1)
+t<- t %>% group_by(patid) %>% mutate(sum_history=sum(i_history))
+## Exclude change medications
+t<- t %>% group_by (patid) %>% mutate(num_uni=length(unique(drugsubstancename)))
+t<- t %>% group_by(patid,prescdate)%>% mutate(num_uni_1=length(unique(drugsubstancename)))
+t<- t  %>% filter(num_uni==1&num_uni_1==1)
+
+test_1<- t %>% filter(sum_history>0) %>% group_by(patid) %>% slice(which.max(prescdate))  ### with hospitalisation history
+test_0<- t %>% filter(sum_history<=0) %>% group_by(patid) %>% slice(which.min(prescdate))  ### with multiple hospitalisation records afterwards
+cohort_<- rbind(test_1,test_0)
+cohort_<- cohort_[,c('patid','prescdate')]
+cohort_e <- inner_join(cohort_big,cohort_,by=c('patid'))
+cohort_e<- select(cohort_e,-prescdate.x)
+names(cohort_e)[names(cohort_e)=='prescdate.y']<- 'prescdate'
+cohort_e$timediff_hosp<- ifelse((cohort_e$hosp==0)&(cohort_e$death==0),ymd("2021-12-31")-ymd(cohort_e$prescdate),ifelse((cohort_e$hosp==0)&(cohort_e$death==1), ymd(cohort_e$dod)-ymd(cohort_e$prescdate),ifelse((cohort_e$hosp==1)&(cohort_e$death==0),ymd(cohort_e$admidate)-ymd(cohort_e$prescdate),ymd(cohort_e$admidate)-ymd(cohort_e$prescdate)))
+                                
+### descriptive statistics, table in chapter 5
+descri_plot<- function(cohort){
+cohort$imd<-factor(cohort$imd)
+cohort$year<- as.factor(cohort$year)
+cohort$hosp<- factor(cohort$hosp,levels = c(1,0),labels = c("Yes","No"))
+cohort$death<- factor(cohort$death,levels = c(1,0),labels = c("Yes","No"))
+cohort$cci_1<- ifelse(cohort$cci_hosp==0,"Equals 0","Larger than 0")
+cohort$cnt_hosp_b<-ifelse(is.na(cohort$cnt_hosp_b),0,cohort$cnt_hosp_b)
+label(cohort$age_group)<-'Age group (years)'
+label(cohort$pat_gender)<-'Gender'
+label(cohort$cci_index)<-'Charlosn Comorbidity Index'
+label(cohort$hosp)<-'Outcome: Hospitalisation'
+label(cohort$death)<-'Outcome:Death'
+label(cohort$imd)<- 'Deprivation Index'
+label(cohort$cnt_hosp_b)<-'Number of hospitalisation before prescription'
+label(cohort$year)<- 'Prescription year'
+table1(~age_group+pat_gender+imd+cci_index+year+death+hosp|drugsubstancename,render.continuous=c(.="Mean(SD)"),data=cohort)
+}
+
+#### constructing PPP using cohort and prescription history
+                                
+ppp_function<- function(n,drug,cohort){
+  linked_data<-  left_join(cohort,drugs,by=c('staffid'))  %>% filter(prescdate.x>prescdate.y)
+  linked_data$txA<-ifelse(linked_data$drugsubstancename.y =="Acamprosate calcium",1,0)
+  linked_data <- linked_data%>% distinct()
+  linked_data<- linked_data %>% group_by(staffid,prescdate.x) %>% mutate(cnt=n())%>% mutate(cnt_1=sum(txA)) %>% mutate(ppp_p=round(cnt_1/cnt,3))
+  linked_data<- linked_data  %>% group_by(staffid,prescdate.x) %>% arrange(staffid,prescdate.y)%>%mutate(ord=order(desc(prescdate.y)))  %>% filter(ord<n+1)
+  linked_data<-linked_data %>% group_by(staffid,prescdate.x)%>%mutate(ppp=sum(txA))
+  linked_data<- linked_data[,c("staffid","ppp","prescdate.x","ppp_p","cnt","cnt_1")] %>% distinct()
+  linked_data$prescdate.x<- ymd(linked_data$prescdate.x)
+  cohort$prescdate<- ymd(cohort$prescdate)
+  data<- left_join(cohort,linked_data,by=c("staffid"="staffid","prescdate"="prescdate.x"))
+  data$txA<-ifelse(data$drugsubstancename =="Acamprosate calcium",1,0)
+  data$cci_1<- ifelse(data$cci_hosp==0,0,1)
+  data<-data %>% filter(age>=18)
+  data$age_group<- cut(data$age,breaks=c(18,40,50,60,70,100),labels=c("18-39 yrs","40-49 yrs","50-59 yrs","60-69 yrs","Older than 70 yrs"),right=FALSE)
+  data$cci_index<- ifelse(data$cci_hosp==0,'0',ifelse(data$cci_hosp==1,'1',ifelse(data$cci_hosp==2,'2',ifelse(data$cci_hosp==3,'3','4'))))
+return(data)
+ }
+                                
+### IV results, Figure 7 in Chapter 5
+
+IV_test_mi_con<- function(data,type){
+  ppp_1$imd_<- ifelse(ppp_1$imd %in% c(1,2),'1st',ifelse(ppp_1$imd %in% c(3,4),'2nd',ifelse(ppp_1$imd %in% c(5,6),'3rd',ifelse(ppp_1$imd %in% c(7,8),'4th','5th'))))
+  data<-ppp_1
+  fit_0_h<-coxph(formula=Surv(timediff_hosp, as.numeric(hosp))~drugsubstancename  +age_group+pat_gender+as.factor(imd_),data=data)
+  fit_0_d<- coxph(formula=Surv(timediff_death, as.numeric(death))~drugsubstancename  +age_group+pat_gender+as.factor(imd_),data=data)
+  ps<- glm(txA~ age_group+pat_gender+as.factor(imd_), family="binomial",data=data)
+  data$psvalue<- predict(ps,type="response")
+  data$weights<- ifelse(data$txA==1,1/data$psvalue,1/(1-data$psvalue))
+  fit_ps_h <-coxph(formula=Surv(timediff_hosp, as.numeric(hosp))~drugsubstancename  +age_group+pat_gender+as.factor(imd_),weights=weights,data=data)
+  data<-ppp_1
+  data$ppp<- data$ppp_p
+  ppp_1_m<- data[,c('patid','age_group','pat_gender','imd_','ppp')]
+  imp<-(mice(ppp_1_m,meth=c("cart"),m=30,print=FALSE,seed=1000))
+  imp<- complete(imp)
+  imp<-imp[,c('patid','ppp')]
+  data<- left_join(data,imp,by=c('patid'))
+  names(data)[names(data)=='ppp.y']<-'ppp'
+  data$pp_1<- data$ppp
+  s<-summary(ivreg(hosp~txA+age_group+pat_gender+as.factor(imd_)+cci_index|ppp+age_group+pat_gender+as.factor(imd_)+cci_index,data=data),diagnostics = TRUE)$diagnostics[1,3]
+  fit1 <- glm(formula= txA~pp_1+cci_index+pat_gender+age_group+as.factor(imd_), family="binomial",data=data)
+  r1<- (residuals.glm(fit1,type='working'))
+  fit2 <-suppressWarnings(coxph(formula=Surv(timediff_hosp, as.numeric(hosp))~drugsubstancename +pat_gender+as.factor(imd_)+r1,data=data))
+  hr_h_<- summary(fit_0_h)$coef[1,2]
+  ci_lower_h_<- exp(confint(fit_0_h))[1,1]
+  ci_upper_h_<-exp(confint(fit_0_h))[1,2]
+  hr_h_ps<- summary(fit_ps_h)$coef[1,2]
+  ci_lower_h_ps<- exp(confint(fit_ps_h))[1,1]
+  ci_upper_h_ps<-exp(confint(fit_ps_h))[1,2]
+  hr_h<- summary(fit2)$coef[1,2]
+  ci_lower_h<- exp(confint(fit2))[1,1]
+  ci_upper_h<-exp(confint(fit2))[1,2]
+  hr_h_0<- summary(fit2_)$coef[1,2]
+  ci_lower_h0<- exp(confint(fit2_))[1,1]
+  ci_upper_h0<-exp(confint(fit2_))[1,2]
+  hr_d<- summary(fit3)$coef[1,2]
+  ci_lower_d<- exp(confint(fit3))[1,1]
+  ci_upper_d<-exp(confint(fit3))[1,2]
+  return(cbind(s,cp,m,ineq,hr_h_0,ci_lower_h0,ci_upper_h0,hr_h,ci_lower_h,ci_upper_h,hr_h_,ci_lower_h_,ci_upper_h_,hr_h_ps,ci_lower_h_ps,ci_upper_h_ps))
+                                }
+
+                                
+###################################Chapter 6#############################################
+                                
+drugs <- dbGetQuery(con, "SELECT DISTINCT t1.serialno AS serialno, t1.concept_id AS concept_id,t1.hba, t1.bnfcode AS bnfcode, t1.drugname_clean AS drugname, pseudonymised_populationid, min(startdate) AS startdate
+
+    FROM s_prescriptions as t1
+    
+    #LIMIT 100
+    
+    INNER JOIN (SELECT serialno
+    
+    FROM o_person
+    
+    WHERE dm_type = 2 AND (date_of_death > 20140101 OR date_of_death IS NULL) AND earliest_mention <=20181231
+    
+    ##### note following statement limits dataset for speed COMMENT OUT for final analyusis
+    
+    #### LIMIT 10000
+    
+    ) AS t3 ON (t1.serialno = t3.serialno)
+    
+    INNER JOIN (SELECT UID AS concept_id, bnfcode, drugname, strength
+    
+    FROM o_concept_drugs
+    
+    WHERE bnfcode IN ('6.1.2.1', '6.1.2.2', '6.1.2.3'
+
+)
+
+) AS t2 ON (t1.concept_id = t2.concept_id)
+    
+    WHERE StartDate> 20100101
+    
+    GROUP BY t1.serialno , t1.concept_id , bnfcode, drugname, pseudonymised_populationid,hba
+
+")
+
+drugs_mel <- dbGetQuery(con, "SELECT DISTINCT t1.serialno AS serialno, t1.concept_id AS concept_id, t1.bnfcode AS bnfcode, t1.drugname_clean AS drugname, pseudonymised_populationid, min(startdate) AS startdate
+
+    FROM s_prescriptions as t1
+    
+    #LIMIT 100
+    
+    INNER JOIN (SELECT serialno
+    
+    FROM o_person
+    
+    WHERE dm_type = 2 AND (date_of_death > 20140101 OR date_of_death IS NULL) AND earliest_mention <=20181231
+    
+    ##### note following statement limits dataset for speed COMMENT OUT for final analyusis
+    
+    #### LIMIT 10000
+    
+    ) AS t3 ON (t1.serialno = t3.serialno)
+    
+    INNER JOIN (SELECT UID AS concept_id, bnfcode, drugname, strength
+    
+    FROM o_concept_drugs
+    
+    WHERE bnfcode IN ('6.1.2.2')
+    ) AS t2 ON (t1.concept_id = t2.concept_id)
+    
+    WHERE StartDate> 20090101
+    
+    GROUP BY t1.serialno , t1.concept_id , bnfcode, drugname, pseudonymised_populationid")
+
+
+
+### have  metformin before the first prescription of second-line treatment
+
+drugname_sul<-c('GLIBENCLAMIDE', 'GLICLAZIDE',  'GLIMEPIRIDE',  'GLIPIZIDE',  'TOLBUTAMIDE')
+drugname_dpp4<- c('LINAGLIPTIN', 'SAXAGLIPTIN', 'SITAGLIPTIN', 'VILDAGLIPTIN')
+
+drugs<- drugs[drugs$drugname %in% c(drugname_sul,drugname_dpp4),]
+drugs$id<- ifelse(drugs$drugname %in% drugname_sul,
+                  "su",ifelse(drugs$drugname %in% drugname_dpp4,"dpp4i",ifelse(drugs$drugname %in% drugname_sglt,"sglt2i","NA")))
+drugs$id<- ifelse(drugs$drugname %in% drugname_sul,
+                  "su",ifelse(drugs$drugname %in% drugname_dpp4,"dpp4i",ifelse(drugs$drugname %in% drugname_sglt,"sglt2i","NA")))
+drugs_sd<- drugs[drugs$id %in% c('su','dpp4i'),]
+drugs<- drugs[drugs$drugname %in% c(drugname_sul,drugname_dpp4,drugname_sglt),]
+##  prescription SU and  DPP4-inhibitor 
+drugs_sd<- drugs[drugs$id %in% c('su','dpp4i'),]
+
+
+hba1c_value<- dbGetQuery(con, "SELECT t1.serialno AS serialno, concept_id AS hba1c_concept_id,  num_value as hba1c, date
+
+    FROM o_observation as t1
+    
+    INNER JOIN (SELECT serialno
+    
+    FROM o_person
+    
+    WHERE dm_type = 2 AND (date_of_death > 20100101 OR date_of_death IS NULL) AND earliest_mention <=20181231
+    
+    ##### note following statement limits dataset for speed COMMENT OUT for final analyusis
+    
+    
+    ) AS t2
+    
+    ON (t1.serialno = t2.serialno)
+    
+    WHERE concept_id IN (1001,8002) AND NOT num_value IS NULL  AND  date > 20090101")
+    
+    bmi_value<- dbGetQuery(con, "SELECT t1.serialno AS serialno, concept_id AS bmi_concept_id,  num_value as bmi, date as bmi_date
+    
+    FROM o_observation as t1
+    
+    WHERE concept_id IN (1123) AND NOT num_value IS NULL  ")
+
+condition_value  <- dbGetQuery(con, "SELECT *
+
+    FROM o_condition
+    
+    WHERE  Startdate > 20100101 AND concept_id IN (1012)")  ### only include the smr00 main condition
+
+person<-  dbGetQuery(con,"select serialno,gender,date_of_birth,ethnic,hba,region  from o_person ")
+person_region<- person[,c('serialno','hba','region')]
+### link the prescriptions with the patients 
+data_form<- function(drug){
+  patients<- drugs_sd %>% group_by(serialno) %>% slice(which.min(startdate))
+  test<- inner_join(drugs_mel,patients,by=c("serialno"))%>% filter(startdate.x<startdate.y) %>% filter(startdate.y-startdate.x<=60)
+  test<-test%>% group_by(serialno) %>%slice(which.min(startdate.x))
+  test<-  test[,c("serialno","startdate.x","startdate.y","id","drugname.y","hba","pseudonymised_populationid.y")]
+  names(test)[names(test)=='startdate.y']<-'startdate'
+  names(test)[names(test)=='startdate.x']<-'mel_date'
+  names(test)[names(test)=='drugname.y']<-'drug_second'
+  test_1<-inner_join(test,drugs_mel,by=c("serialno"))%>% filter(startdate.x<=startdate.y)%>% group_by(serialno) %>% slice(which.min(startdate.y))
+  names(test_1)[names(test_1)=='startdate.x']<- 'startdate'
+  patients<- test_1[,c(1:9)]
+  linked_data<- inner_join(patients,person,by=c("serialno"))
+  linked_data$age<- as.numeric((linked_data$startdate-linked_data$date_of_birth))%/%365.25
+  names(linked_data)[names(linked_data)=='pseudonymised_populationid.y']="pseudonymised_populationid."
+  return(linked_data)
+}
+
+linked_data<- data_form(drugs_sd)
+
+### link the baseline HbA1c
+hba1c_baseline<- inner_join(linked_data,hba1c_value,by=c("serialno"))%>% filter(startdate>date)%>% mutate(timediff=startdate-date)%>%  filter(timediff<366)
+hba1c_baseline<- hba1c_baseline %>% group_by(serialno)  %>% slice(which.min(timediff))
+hba1c_baseline$timediff<- as.numeric(hba1c_baseline$timediff)
+hba1c_baseline<- hba1c_baseline[,c("serialno","hba1c","timediff")]
+### link the one-year follow-up HbA1c  (time window range from 280 days and 448 days)
+outcome_follow<- inner_join(linked_data,hba1c_value,by=c("serialno"))%>% filter(date>startdate) %>% mutate(timediff=date-startdate)
+outcome_follow<- outcome_follow %>% filter(timediff>=280 & timediff<=448 ) %>% group_by(serialno) %>%slice(which.min(abs(timediff-365)))
+outcome_follow$timediff<-as.numeric(outcome_follow$timediff)
+outcome_follow<- outcome_follow[,c("serialno","hba1c","timediff")]
+
+### constructing the study cohort
+cohort<- inner_join(linked_data,hba1c_baseline,by=c("serialno")) ### join with baseline value;
+cohort<- inner_join(cohort,outcome_follow,by=c("serialno")) ### join with the outcome value;
+cohort$follow_hba1c<- cohort$hba1c.x-cohort$hba1c.y
+bmi<- inner_join(cohort,bmi_value,by=c('serialno'))
+bmi <- bmi %>%group_by(serialno)%>% filter(startdate>bmi_date) %>% slice(which.max(bmi_date))
+bmi<- bmi[,c("serialno","bmi")]
+condition<- condition_value %>% filter(condition_value$serialno %in% cohort$serialno)
+condition$condition_code<- gsub("\\.","",condition$condition_code)
+cci<- comorbidity(x=condition,id="serialno",code="condition_code",score="charlson",icd="icd10",assign0=FALSE)
+cci<- cci[,c("serialno","score")]
+cohort<- left_join(cohort,cci,by=c("serialno"))
+names(cohort)[names(cohort)=='score']<-'cci'
+cohort$cci<- ifelse(is.na(cohort$cci),0,cohort$cci)
+cohort<- left_join(cohort,bmi,by=c("serialno"))
+names(cohort)[names(cohort)=='id']<-'Drug'
+cohort$ethnic<-  ifelse(str_detect(cohort$ethnic, "^1"),"White",ifelse(str_detect(cohort$ethnic,"^3"),"Asian",ifelse(str_detect(cohort$ethnic,"^4"),"Black",ifelse(str_detect(cohort$ethnic,c("^2","^5")),"Mixed/Other","Missing/Unknown"))))
+cohort$gender<- as.character(cohort$gender)
+cohort$gender<- ifelse(cohort$gender=="1","Male","Female")
+cohort<- cohort[cohort$age>=18 & cohort$age<=78,]
+cohort_<- cohort[,c("serialno","drug_second","gender","age","hba1c.x","ethnic","cci","bmi")]
+cohort$bmi<- as.numeric(cohort$bmi)
+imp<- mice(cohort_,meth=c("cart"),m=20)
+imp<- complete(imp)
+imp<- imp[,c("serialno","bmi")]
+cohort<- inner_join(cohort,imp,by=c("serialno"))
+names(cohort)[names(cohort)=='bmi.y']<-'bmi'
+
+##pregnancy
+condition_pregnancy  <- dbGetQuery(con, "SELECT *
+
+  FROM o_condition
+  
+  WHERE  Startdate > 20100101 AND concept_id IN (2500)")  ### only include the smr00 main condition
+
+pregnant<- inner_join(cohort_sd,condition_pregnancy, by=c("serialno")) %>% filter(Startdate> startdate && startdate+365>Startdate)
+pregnant<- pregnant[,c('serialno')]
+## exclude history of  type  1 diabetes
+person_dm1<- dbGetQuery(con,"SELECT *
+  FROM  o_person
+  WHERE dm_type=1 AND (date_of_death > 20100101 OR date_of_death IS NULL) AND earliest_mention <=20181231
+")
+
+
+dm1<- inner_join(person_dm1,cohort_sd,by=c("serialno"))#### test=0
+dm1<- dm1[,c('serialno')]
+
+### insulin before 8 weeks.
+drug_insulin<- dbGetQuery(con, "SELECT DISTINCT t1.serialno AS serialno, t1.concept_id AS concept_id, t1.bnfcode AS bnfcode, t1.drugname_clean AS drugname, pseudonymised_populationid, min(startdate) AS insulin_date
+    
+    FROM s_prescriptions as t1
+    
+    #LIMIT 100
+    
+    INNER JOIN (SELECT serialno
+    
+    FROM o_person
+    
+    WHERE dm_type = 2 AND (date_of_death > 20100101 OR date_of_death IS NULL) AND earliest_mention <=20181231
+    
+    ##### note following statement limits dataset for speed COMMENT OUT for final analyusis
+    
+    #### LIMIT 10000
+    
+    ) AS t3 ON (t1.serialno = t3.serialno)
+    
+    INNER JOIN (SELECT UID AS concept_id, bnfcode, drugname, strength
+    
+    FROM o_concept_drugs
+    
+    WHERE bnfcode IN ('6.1.1.1', '6.1.1.2'
+    
+    )
+    
+    ) AS t2 ON (t1.concept_id = t2.concept_id)
+    
+    WHERE StartDate> 20100101
+    
+    GROUP BY t1.serialno , t1.concept_id , bnfcode, drugname, pseudonymised_populationid
+
+")
+  
+insulin<- inner_join(cohort_sd,drug_insulin,by=c("serialno")) %>% filter(startdate>insulin_date+56)
+insulin<- insulin[,c('serialno')]
+
+efgr_value<- dbGetQuery(con, "SELECT t1.serialno AS serialno, concept_id,  num_value as efgr_value, date as efgr_date
+
+  FROM o_observation as t1
+  INNER JOIN (SELECT serialno
+  FROM o_person
+  WHERE dm_type = 2 AND (date_of_death > 20100101 OR date_of_death IS NULL) AND earliest_mention <=20181231
+) AS t2
+
+  ON (t1.serialno = t2.serialno)
+  
+  WHERE concept_id IN (4012,4013,4014,4015,4016,4017,4020,4021) AND NOT num_value IS NULL  ")
+  
+  efgr<- inner_join(cohort_sd,efgr_value,by=c('serialno'))
+  efgr<-efgr[efgr$mel_date>efgr$efgr_date,]
+  efgr <- efgr %>%group_by(serialno)%>% slice(which.max(efgr_date))
+  efgr<- efgr %>% filter(efgr_value<30)
+  efgr<- efgr[,c('serialno')]
+  ## exclusion list;
+  el<- c(pregnant$serialno , insulin$serialno, efgr$serialno)
+  el<- unique(el)
+  el<- as.character(el)
+
+  
+  
+cohort<- cohort[cohort$serialno %!in% el,]
+names(cohort)[names(cohort)=='pseudonymised_populationid.']<-'pseudonymised_populationid'
+names(cohort_sd)[names(cohort_sd)=='Baseline HbA1c']<-'hba1c.x'
+  
+#### constructing PP IV
+
+pp_sd_year<- function(drug,linked_data,n){
+    drug<- drugs_sd
+    drug<- drug[,c("startdate","pseudonymised_populationid","id")]
+    linked_data<-linked_data[,c("pseudonymised_populationid","startdate")]
+    linked_data$startdate<- ymd(linked_data$startdate)
+    data<- left_join(linked_data,drug,by=c("pseudonymised_populationid"))  %>%filter(startdate.x> startdate.y)
+    data<- data%>%mutate(timediff=as.numeric(startdate.x-startdate.y))
+    
+    data<- data%>% filter(data$timediff<=n)
+    data$txA<- ifelse(data$id=="su",1,0)
+    data<- data %>% group_by(pseudonymised_populationid,startdate.x) %>% arrange(pseudonymised_populationid,startdate.y) %>% mutate(ord=order((startdate.y)))
+    data <- data %>% group_by(pseudonymised_populationid,startdate.x)%>% mutate(pp=sum(txA)) %>% mutate(cnt=max(ord))
+    data<- data %>% subset(select=c('pseudonymised_populationid','pp','cnt','startdate.x'))
+    names(data)[names(data)=="startdate.x"]<-"startdate"
+    data<- data %>% distinct()
+    
+    ppp_results<-  left_join(cohort_sd,data,by=c("pseudonymised_populationid","startdate"))
+    ppp_results$age_group<-cut(ppp_results$age,breaks=c(0,50,60,70,100),labels = c("Younger than 50", "50-60", "60-70", "70 or older"),right=FALSE)
+    ppp_results$follow_hba1c<- ppp_results$hba1c.x-ppp_results$hba1c.y
+    names(ppp_results)[names(ppp_results)=='hba1c.x']<-'baseline_hba1c'
+    ppp_results$baseline_hba1c_group<- cut(ppp_results$baseline_hba1c,breaks=c(0,64,74,200),labels=c("HbA1c < 64 mmol/mol","HbA1c 64 to 74 mmol/mol","HbA1c >=74 mmol/mol"),right=FALSE)
+    ###data$CCI[is.na(data$CCI)]<- 0
+    ppp_results$pp<- round(ppp_results$pp/ppp_results$cnt,3)
+    ppp_results$drug<- ifelse(ppp_results$Drug=='su',1,0)
+    ppp_results<- ppp_results %>% distinct()
+    return(ppp_results)
+  }
+ppp_1<-  pp_sd_year(drugs_sd,cohort_sd,365)
+names(cohort_sd)[names(cohort_sd)=='startdate.x']<-'startdate'
+
+
+#### descriptive statistics, Table 13 in Chapter 6
+
+label(cohort_sd$age)<-'Age (years)'
+label(cohort_sd$gender)<-'Gender'
+label(cohort_sd$cci)<-'Charlson Comorbidity Index'
+label(cohort_sd$bmi.x)<-'BMI(kg/m2)'
+label(cohort_sd$hba1c.x)<-'Baseline HbA1c (mmol/mol)'
+label(cohort_sd$ethnic)<-'Ethnic'
+table1(~age+gender+cci++ethnic+hba1c.x+bmi.x|Drug,data=cohort_sd,render.continuous=c(.="Mean(SD)"))
+
+### multivariable regression results, Table 14 in Chapter 6
+regression_results<- function (data){
+    
+    #data$ppp<- ifelse(data$pp>summary(data$pp)[3],1,0)
+    data$cci<- as.factor(data$cci)
+    data$year<- as.factor(data$year)
+    fit_iv<- iv_robust(follow_hba1c~Drug+gender+age+ethnic+bmi+cci+baseline_hba1c|ppp+gender+age+ethnic+bmi+cci+baseline_hba1c,data=data,clusters=pseudonymised_populationid)
+    fit_lm<- lm_robust(follow_hba1c~Drug+gender+age+ethnic+bmi+cci+baseline_hba1c,data=data,clusters=pseudonymised_populationid)
+    ps<- glm(drug~gender+age+ethnic+bmi+cci+baseline_hba1c, family="binomial",data=data)
+    data$psvalue<- predict(ps,type="response")
+    data$weights<- ifelse(data$drug==1,1/data$psvalue,1/(1-data$psvalue))
+    fit_ps <-lm_robust(follow_hba1c~Drug+gender+age+ethnic+bmi+cci+baseline_hba1c,data=data,clusters=pseudonymised_populationid,weights=weights)
+    
+    
+    fit_iv_<- iv_robust(follow_hba1c~Drug+gender+age+ethnic+bmi+cci|ppp+gender+age+ethnic+bmi+cci,data=data,clusters=pseudonymised_populationid)
+    fit_lm_<- lm_robust(follow_hba1c~Drug+gender+age+ethnic+bmi+cci,data=data,clusters=pseudonymised_populationid)
+    ps_<- glm(drug~gender+age+ethnic+bmi+cci, family="binomial",data=data)
+    data$psvalue<- predict(ps_,type="response")
+    data$weights<- ifelse(data$drug==1,1/data$psvalue,1/(1-data$psvalue))
+    fit_ps_ <-lm_robust(follow_hba1c~Drug+gender+age+ethnic+bmi+cci,data=data,clusters=pseudonymised_populationid,weights=weights)
+    
+    
+    tab_model(fit_lm,fit_lm_,fit_ps,fit_ps_,fit_iv,fit_iv_,dv.labels = c("OLS_1","OLS_2","Propensity score 1","Propensity score 2","2SLS 1"," 2SLS 2"),show.intercept=FALSE,show.fstat=TRUE,show.se=FALSE,p.style="stars",title="Comparison between SU and DPP4i")
+  }
+regression_results(ppp_1)
+ppp_1$cci<-  as.factor(ppp_1$cci)
+
+#### results from MTE, Table 15 in Chapter 6
+
+install.packages("lpSolveAPI")
+library(lpSolveAPI)
+
+summary(ppp_1$pp)
+args <- ivmte(data = ppp_1[,c('age','gender','bmi','baseline_hba1c','drug','ppp','follow_hba1c','ethnic','cci')],
+              ivlike = follow_hba1c~ drug +factor(ppp)+drug*factor(ppp),
+              target = "late",
+              late.from = c(ppp = 0),
+              late.to = c(ppp = 1),
+              m0 = ~ u,
+              m1 = ~ u,
+              propensity = drug ~ factor(ppp)+age+gender+ethnic+bmi+cci,bootstraps=1000)
+summary(args)
+
+args <- ivmte(data = ppp_1[,c('age','gender','bmi','baseline_hba1c','drug','pp','follow_hba1c','ethnic')],
+              ivlike = ( baseline_hba1c )~ drug +pp,
+              target = "ate",
+              m0 = ~ u,
+              m1 = ~ u,
+              propensity = drug ~ pp+gender+age+bmi+ethnic,bootstraps=50)
+summary(args)
+
+
+### Logistic regression results for the binary outcomes,Table 16 in Chapter 6
+
+
+cohort_sd$reduced<- ifelse(cohort_sd$hba1c.y<42,1,0)
+cohort_sd$reduced_1<- ifelse(cohort_sd$hba1c.y<48,1,0)
+cohort_sd$cci<- as.factor(cohort_sd$cci)
+fit_glm_1<-glm(reduced~Drug+age+gender+bmi+cci+hba1c.x+ethnic,data=cohort_sd[cohort_sd$hba1c.x>48,],family=binomial("logit"))
+fit_glm_2<-glm(reduced_1~Drug+age+gender+bmi+cci+hba1c.x+ethnic,data=cohort_sd[cohort_sd$hba1c.x>48,],family=binomial("logit"))
+fit_glm_1_un<- glm(reduced~Drug,data=cohort_sd[cohort_sd$hba1c.x>48,],family=binomial("logit"))
+fit_glm_2_un<- glm(reduced_1~Drug,data=cohort_sd[cohort_sd$hba1c.x>48,],family=binomial("logit"))
+
+tab_model(fit_glm_1_un, fit_glm_2_un, fit_glm_1,fit_glm_2,dv.labels=c("HbA1c less than 42 mmol/mol","HbA1c  less than 47 mmol/mol","HbA1c less than 42 mmol/mol","HbA1c less than 47 mmol/mol"),  show.intercept = FALSE,show.se=TRUE,show.ci=FALSE,vcov.fun = "HC",vcov.args = list(cluster=cohort_sd$pseudonymised_populationid))
+
+
+## 2SRI estimates of binary outcomes, Table 17 in Chapter 6
+
+ppp_test_2sri_binary<- function(n){
+  time<- 200
+  w<- c(rep(0,n))
+  wh<-c(rep(0,n))
+  p<-c(rep(0,n))
+  c_l<- c(rep(0,n))
+  c_u<- c(rep(0,n))
+  c_l_1<- c(rep(0,n))
+  c_u_1<- c(rep(0,n))
+  e<-c(rep(0,n))
+  t<- c(rep(0,n))
+  p_1<-c(rep(0,n))
+  e_1<-c(rep(0,n))
+  
+  
+  for (i in 1:n){
+    
+    data<-  pp_sd_year(drugs_sd,cohort_sd,time)
+    median<- summary(data$pp)[3]
+    
+    data<- data[!is.na(data$pp),]
+    data<- data[data$baseline_hba1c>48,]
+    data$ppp<- ifelse(data$pp>=median,1,0)
+    s1<- glm(drug~ppp+age+gender+bmi+cci+baseline_hba1c+ethnic,data=data,family=binomial("logit"))
+    ##s1<- lm(txA~ppp+age+gender+bmi+cci+baseline_hba1c+ethnic,data=data)
+    r1<- residuals.glm(s1,type=c("pearson"))
+    
+    s2<- glm(reduced~Drug+r1+age+gender+bmi+cci+baseline_hba1c+ethnic,data=data,family=binomial("logit"))
+    s<-summary(s2)
+    e[i]<- exp(s$coefficients[2,1])
+    p[i]<-  s$coefficients[2,4]
+    c_l[i]<- exp(confint(s2)[2,1])
+    c_u[i]<- exp(confint(s2)[2,2])
+    s2_1<- glm(reduced_1~Drug+r1+age+gender+bmi+cci+baseline_hba1c+ethnic,data=data,family=binomial("logit"))
+    s_1<-summary(s2_1)
+    e_1[i]<- exp(s_1$coefficients[2,1])
+    p_1[i]<-  s_1$coefficients[2,4]
+    
+    c_l_1[i]<-exp(confint(s2_1)[2,1])
+    c_u_1[i]<- exp(confint(s2_1)[2,2])
+    t[i]<- time
+    time=time+40
+    
+  }
+  return(cbind(t,e,c_l,c_u,p,e_1,c_l_1,c_u_1,p_1))
+}
+ppp_test_2sri_binary(20)
+
+### SMD plot, Figure 10 in supplementary material
+m.out1 <- MatchIt::matchit(drug ~ age + gender+cci + bmi + ethnic +baseline_hba1c
+                             ,
+                             data = ppp_1,
+                             method = NULL,
+                             replace = TRUE)
+m.out2 <- MatchIt::matchit(ppp ~ age + gender+cci + bmi + ethnic +baseline_hba1c
+                             ,
+                             data = ppp_1[!is.na(ppp_1$ppp),],
+                             method = NULL,
+                             replace = TRUE)
+g1<-love.plot(m.out1, binary = "std", thresholds = c(m = .1),abs = TRUE,line=TRUE,sample.names=c('SMD based on treatment'),position='top')
+g2<-love.plot(m.out2, binary = "std", thresholds = c(m = .1),abs = TRUE,line=TRUE,sample.names=c('SMD based on IV'),position='top')
+ggarrange(g1,g2)
+  
+### validation of monotonicity assumption,  Table 10 in supplmentary material 
+ppp_1<-  pp_sd_year(drugs_sd,cohort_sd,200)
+data<- ppp_1[ppp_1$baseline_hba1c>48,]
+data$ppp<- ifelse(data$pp>=summary(data$pp)[3],1,0)
+xt <- xtabs(~ drug + reduced + ppp, data = data)
+p <- prop.table(xt, margin = 3)
+bpres <- bpbounds(p)
+summary(bpres)#### assumptions are true;
+### sensitivity analysis, Figure 11  in supplementary material 
+sens.model<- lm(follow_hba1c~txA+age+gender+ethnic+cci+bmi+baseline_hba1c,data=ppp_1)
+sens<-sensemakr(model=sens.model,treatment="txA",benmaker_covariates="gender",kd=1:30)
+summary(sens)
+
+  
+################################ Chapter 7#########################################
+
+## sample size=2452
+set.seed(324)
+cnt_phy<-80
+n.pp.lb <- 10 # Number of patients/physician, lower bound
+n.pp.ub <- 50 # Number of patients/physician, upper bound
+n.pp <- round(runif(cnt_phy, n.pp.lb, n.pp.ub))
+phyId <- rep(1:cnt_phy, times=n.pp)
+patId <- NULL
+for (i in 1:cnt_phy){patId <- c(patId, seq(1:n.pp[i]))} ## write in patient id
+  
+  
+### sample size=620
+cnt_phy<-20
+n.pp.lb <- 10 # Number of patients/physician, lower bound
+n.pp.ub <- 50 # Number of patients/physician, upper bound
+n.pp <- round(runif(cnt_phy, n.pp.lb, n.pp.ub))
+phyId <- rep(1:cnt_phy, times=n.pp)
+patId <- NULL
+for (i in 1:cnt_phy){patId <- c(patId, seq(1:n.pp[i]))} ## write in patient id
+
+### main function for the simulation, including the data generation process,
+
+my_simulation_prior_continuous<- function(gamma2,n){
+    ### gamma2 controls the unmeasured confounders
+    
+    set.seed(324)
+    ## define the value of PPP
+    ppp_10<- c(0,1)
+    ppp_10<- sample(ppp_10,cnt_phy,replace=TRUE,prob=c(0.3,0.7))
+    ppp_10<- rep(ppp_10,times=n.pp)
+    
+    # define the variables that store the values
+    
+    iv_strength<- c(rep(NA,20))
+    cov_iv<- c(rep(NA,20))
+    cov_ols<- c(rep(NA,20))
+    iv_coef<- c(rep(NA,20))
+    lm_coef<- c(rep(NA,20))
+    un_coef<- c(rep(NA,20))
+    # true_coef<- c(rep(NA,20))
+    cnt<- c(rep(NA,20))
+    p_2sls<- c(rep(NA,20))
+    bias_iv_1<-c(rep(NA,20))
+    bias_iv_2<-c(rep(NA,20))
+    bias_iv_3<-c(rep(NA,20))
+    sd_iv<- c(rep(NA,20))
+    sd_iv_r<- c(rep(NA,20))
+    sd_ols<- c(rep(NA,20))
+    sd_ols_r<- c(rep(NA,20))
+    p_2sls_r<- c(rep(NA,20))
+    power_2sls<- c(rep(NA,20))
+    power_2sls_r<- c(rep(NA,20))
+    ci_lower<- c(rep(NA,20))
+    ci_upper<- c(rep(NA,20))
+    true_coef<- c(rep(NA,20))
+    
+    ci_lower_lm<-c(rep(NA,20))
+    ci_upper_lm<-c(rep(NA,20))
+    para<- c(rep(NA,20))
+    prop_com<-c(rep(NA,20))
+    
+    for ( j in 1:20){
+      n_1<-0
+      coef_iv<- c(rep(NA,sim))
+      coef_bias<- c(rep(NA,sim))
+      coef_un<- c(rep(NA,sim))
+      coef_true<- c(rep(NA,sim))
+      ci_iv_lower<-c(rep(NA,sim))
+      ci_iv_upper<- c(rep(NA,sim))
+      ci_bias_lower<- c(rep(NA,sim))
+      ci_bias_upper<-  c(rep(NA,sim))
+      w_iv<- c(rep(NA,sim)) # iv strength
+      
+      p_2sls_1<-c(rep(NA,sim))
+      c<-c(rep(NA,sim))
+      c1<-c(rep(NA,sim))
+      c2<-c(rep(NA,sim))
+      iv_sd<-c(rep(NA,sim))
+      iv_sd_r<- c(rep(NA,sim))
+      lm_sd<- c(rep(NA,sim))
+      lm_sd_r<- c(rep(NA,sim))
+      p_2sls_r_1<- c(rep(NA,sim))
+      prop_complier<-c(rep(NA,sim))
+      
+      for( i in 1: sim){
+        
+        gender <- rbinom(sum(n.pp), 1, 0.6)# gender
+        dosage<- rnorm(sum(n.pp),13,2)
+        un<- rnorm(sum(n.pp), 1,0.5)  ## unmeasured covariates
+        ptxA<- (0.4*ppp_10+0.02*dosage+ 0.053*gender+0.15*un)/1-0.04
+        ptxA<- ifelse(ptxA>1,0.99,ifelse(ptxA<0,0,ptxA))## make sure the ptxA is between 1 and 0
+        
+        txA <- rbinom(sum(n.pp), 1,ptxA)### ppp and exposure....
+        pout<-(0.10*txA+0.01*dosage+0.04*gender+gamma2*un)/1-0.01
+        pout<- ifelse(pout>1,0.99,ifelse(pout<0,0,pout))# make sure the pout is between 1 and 0
+        out <- rbinom(sum(n.pp), 1,pout)
+        data<- as.data.frame(cbind(phyId,patId, txA,out, gender,dosage, un))
+        ### calculate the proxy for PPP
+        data<-data %>% group_by(phyId) %>% mutate(ppp= roll_sum(lag(txA),n,fill = NA,align = "right"))
+        mean<- summary(data$ppp)[4]
+        names(mean)<- NULL
+        data$ppp_1<- ifelse(data$ppp>mean,1,0)
+        w1<-nrow(data[data$ppp_1==1 & data$txA==1,])
+        w0<- nrow(data[data$ppp_1==0 & data$txA==0,])
+        s1<- summary(lm(un~ppp,data=data))
+        s2<- summary(lm(txA~ppp,data=data))
+        s3<- summary(lm(out~ppp,data=subset(data,txA==0)))
+        s3_1<- summary(lm(out~ppp,data=subset(data,txA==1)))
+        s4<- summary(lm(un~out,data=data))
+        p_un<- s1$coefficients[2,4]
+        p_x<-s2$coefficients[2,4]
+        p_y<-s3$coefficients[2,4]
+        p_y_1<-s3_1$coefficients[2,4]
+        ### 2SLS estimates
+        fit_iv<- ivreg(out~txA+gender+dosage|ppp+gender+dosage,data=data)
+        ci_iv<- confint(fit_iv)
+        s_iv<- summary(fit_iv,diagnostic=TRUE)
+        ci_iv_lower[i]<- ci_iv[2,1]
+        ci_iv_upper[i]<- ci_iv[2,2]
+        
+        coef_iv[i]<- s_iv$coefficients[2,1]
+        w_iv[i]<- s_iv$diagnostics[1,3]## IV strength(F-statistics)
+        iv_sd[i]<- s_iv$coefficients[2,2] ## standard deviation for 2sls
+        data_1<- na.omit(data)
+        iv_sd_r[i]<- cluster.robust.se(fit_iv,data_1$phyId)[2,2]
+        p_2sls_r_1[i]<- cluster.robust.se(fit_iv,data_1$phyId)[2,4]
+        p_2sls_1[i]<-s_iv$coefficients[2,4]
+        
+        
+        ## OLS adjusted the measured covariates
+        fit_lm_bias<-lm(out~txA+gender+dosage,data=data)
+        s_bias<- summary(fit_lm_bias)
+        
+        ci_bias<- confint(fit_lm_bias)
+        ci_bias_lower[i]<- ci_bias[2,1]
+        ci_bias_upper[i]<- ci_bias[2,2]
+        
+        coef_bias[i]<- s_bias$coefficients[2,1]
+        lm_sd[i]<- s_bias$coefficients[2,2]
+        ## cluster robust se
+        
+        lm_sd_r[i]<-cluster.robust.se(fit_lm_bias,phyId)[2,2]
+        
+        fit_lm_true<- lm(out~txA+gender+dosage+un,data=data)
+        s_true<- summary(fit_lm_true)
+        coef_true[i]<- s_true$coefficients[2,1]
+        ### unadjusted OLS
+        
+        fit_lm_un<- lm(out~ txA, data=data)
+        s_un<- summary(fit_lm_un)
+        coef_un[i]<- s_un$coefficients[2,1]
+        
+        c[i]<-cov(data_1$ppp,data_1$gender)/cov(data_1$ppp,data_1$txA)
+        c1[i]<-cov(data_1$ppp,data_1$dosage)/cov(data_1$ppp,data_1$txA)
+        c2[i]<-cov(data_1$ppp,data_1$un)/cov(data_1$ppp,data_1$txA)
+        
+        prop_complier[i]<- (w1+w0)/nrow(data)
+        
+      }
+      
+      
+      cnt[j]<-nrow(data) ## count valid iv
+      p_2sls[j]<- mean(na.omit(p_2sls_1))
+      p_2sls_r[j]<- mean(na.omit(p_2sls_r_1))
+      power_2sls[j]<-sum((na.omit(p_2sls_1))<0.05)
+      power_2sls_r[j]<- sum((na.omit(p_2sls_r_1))<0.05)
+      bias_iv_1[j]<- mean(na.omit(c))
+      bias_iv_2[j]<- mean(na.omit(c1))
+      bias_iv_3[j]<- mean(na.omit(c2))
+      sd_iv[j]<- mean(na.omit(iv_sd))
+      sd_ols[j]<- mean(na.omit(lm_sd))
+      sd_iv_r[j]<- mean(na.omit(iv_sd_r))
+      sd_ols_r[j]<- mean(na.omit(lm_sd_r))
+      cov_ols[j]<- (sum((na.omit(ci_bias_lower)<=0.1)&(na.omit(ci_bias_upper)>=0.1)))
+      cov_iv[j]<- (sum((na.omit(ci_iv_lower)<= 0.1)&(na.omit(ci_iv_upper) >= 0.1)))
+      ci_lower[j]<- mean(na.omit(ci_iv_lower))
+      ci_upper[j]<- mean(na.omit(ci_iv_upper))
+      ci_lower_lm[j]<- mean(na.omit(ci_bias_lower))
+      ci_upper_lm[j]<- mean(na.omit(ci_bias_upper) )
+      iv_coef[j]<- mean(na.omit(coef_iv))
+      lm_coef[j]<- mean(na.omit(coef_bias))
+      un_coef[j]<- mean(na.omit(coef_un))
+      true_coef[j]<- mean(na.omit(coef_true))
+      iv_strength[j]<-mean(na.omit(w_iv))
+      prop_com[j]<- mean(na.omit(prop_complier))
+      para[j]=gamma2
+      gamma2=gamma2+0.02
+    }
+    
+    df<- data.frame(sim, para,prop_com,sd_iv,sd_iv_r,sd_ols,sd_ols_r,lm_coef, un_coef,iv_coef,iv_strength,cov_ols,cov_iv,p_2sls,p_2sls_r,bias_iv_1,bias_iv_2,bias_iv_3,ci_lower,ci_upper,ci_lower_lm,ci_upper_lm)
+    df<- df %>% mutate(per_bias_iv=abs((0.1-iv_coef)/abs(0.1)))%>% mutate(per_bias_ols=abs((0.1-lm_coef)/abs(0.1)))
+    df<- df%>% mutate(cov_ols=round(cov_ols/sim,4)) %>% mutate(cov_iv=round(cov_iv/sim,4))
+    df<-df %>% mutate(power_2sls_r=round(power_2sls_r/sim,4))
+    ##df<-
+    
+    return(df)
+    
+  }
+my_simulation_prior_n_c<- function(gamma2,n){
+    ### gamma2 controls the unmeasured confounders
+    set.seed(324)
+    ## define the value of PPP
+    ppp_10<- c(0,1)
+    ppp_10<- sample(ppp_10,cnt_phy,replace=TRUE,prob=c(0.3,0.7))
+    ppp_10<- rep(ppp_10,times=n.pp)
+    
+    # define the variables that store the values
+    
+    iv_strength<- c(rep(NA,20))
+    cov_iv<- c(rep(NA,20))
+    cov_ols<- c(rep(NA,20))
+    iv_coef<- c(rep(NA,20))
+    lm_coef<- c(rep(NA,20))
+    un_coef<- c(rep(NA,20))
+    # true_coef<- c(rep(NA,20))
+    cnt<- c(rep(NA,20))
+    p_2sls<- c(rep(NA,20))
+    bias_iv_1<-c(rep(NA,20))
+    bias_iv_2<-c(rep(NA,20))
+    bias_iv_3<-c(rep(NA,20))
+    sd_iv<- c(rep(NA,20))
+    sd_iv_r<- c(rep(NA,20))
+    sd_ols<- c(rep(NA,20))
+    sd_ols_r<- c(rep(NA,20))
+    p_2sls_r<- c(rep(NA,20))
+    power_2sls<- c(rep(NA,20))
+    power_2sls_r<- c(rep(NA,20))
+    ci_lower<- c(rep(NA,20))
+    ci_upper<- c(rep(NA,20))
+    true_coef<- c(rep(NA,20))
+    
+    ci_lower_lm<-c(rep(NA,20))
+    ci_upper_lm<-c(rep(NA,20))
+    para<- c(rep(NA,20))
+    prop_com<-c(rep(NA,20))
+    
+    for ( j in 1:20){
+      n_1<-0
+      coef_iv<- c(rep(NA,sim))
+      coef_bias<- c(rep(NA,sim))
+      coef_un<- c(rep(NA,sim))
+      coef_true<- c(rep(NA,sim))
+      ci_iv_lower<-c(rep(NA,sim))
+      ci_iv_upper<- c(rep(NA,sim))
+      ci_bias_lower<- c(rep(NA,sim))
+      ci_bias_upper<-  c(rep(NA,sim))
+      w_iv<- c(rep(NA,sim)) # iv strength
+      
+      p_2sls_1<-c(rep(NA,sim))
+      c<-c(rep(NA,sim))
+      c1<-c(rep(NA,sim))
+      c2<-c(rep(NA,sim))
+      iv_sd<-c(rep(NA,sim))
+      iv_sd_r<- c(rep(NA,sim))
+      lm_sd<- c(rep(NA,sim))
+      lm_sd_r<- c(rep(NA,sim))
+      p_2sls_r_1<- c(rep(NA,sim))
+      prop_complier<-c(rep(NA,sim))
+      
+      for( i in 1: sim){
+        
+        gender <- rbinom(sum(n.pp), 1, 0.6)# gender
+        dosage<- rnorm(sum(n.pp),13,2)
+        un<- rnorm(sum(n.pp), 1,0.5)  ## unmeasured covariates
+        ptxA<- (0.4*ppp_10+0.02*dosage+ 0.053*gender+0.15*un)/1-0.04
+        ptxA<- ifelse(ptxA>1,0.99,ifelse(ptxA<0,0,ptxA))## make sure the ptxA is between 1 and 0
+        
+        txA <- rbinom(sum(n.pp), 1,ptxA)### ppp and exposure....
+        pout<-(0.10*txA+0.01*dosage+0.04*gender+gamma2*un)/1-0.01
+        pout<- ifelse(pout>1,0.99,ifelse(pout<0,0,pout))# make sure the pout is between 1 and 0
+        
+        out <- rbinom(sum(n.pp), 1,pout)
+        
+        data<- as.data.frame(cbind(phyId,patId, txA,out, gender,dosage, un))
+        ### calculate the proxy for PPP
+        data<-data %>% group_by(phyId) %>% mutate(ppp= roll_sum(lag(txA),n,fill = NA,align = "right"))
+        mean<- summary(data$ppp)[4]
+        names(mean)<- NULL
+        data$ppp_1<- ifelse(data$ppp>mean,1,0)
+        w1<-nrow(data[data$ppp_1==1 & data$txA==1,])
+        w0<- nrow(data[data$ppp_1==0 & data$txA==0,])
+        #w1<-nrow(data[data$ppp==1 & data$txA==1,])
+        #w0<- nrow(data[data$ppp==0 & data$txA==0,])
+        
+        s1<- summary(lm(un~ppp,data=data))
+        s2<- summary(lm(txA~ppp,data=data))
+        s3<- summary(lm(out~ppp,data=subset(data,txA==0)))
+        s3_1<- summary(lm(out~ppp,data=subset(data,txA==1)))
+        s4<- summary(lm(un~out,data=data))
+        p_un<- s1$coefficients[2,4]
+        p_x<-s2$coefficients[2,4]
+        p_y<-s3$coefficients[2,4]
+        p_y_1<-s3_1$coefficients[2,4]
+        
+        
+        #  if (p_un>0.05& p_x<0.05& p_y>0.1& p_y_1>0.1) ## 1. iv not associated with unmeasured confounder; iv does not impact the outcome directly;
+        #{
+        
+        #  n_1=n_1+1
+        
+        #}
+        ### 2SLS estimates
+        fit_iv<- ivreg(out~txA+gender+dosage|ppp+gender+dosage,data=data)
+        ci_iv<- confint(fit_iv)
+        s_iv<- summary(fit_iv,diagnostic=TRUE)
+        ci_iv_lower[i]<- ci_iv[2,1]
+        ci_iv_upper[i]<- ci_iv[2,2]
+        
+        coef_iv[i]<- s_iv$coefficients[2,1]
+        w_iv[i]<- s_iv$diagnostics[1,3]## IV strength(F-statistics)
+        iv_sd[i]<- s_iv$coefficients[2,2] ## standard deviation for 2sls
+        data_1<- na.omit(data)
+        iv_sd_r[i]<- cluster.robust.se(fit_iv,data_1$phyId)[2,2]
+        p_2sls_r_1[i]<- cluster.robust.se(fit_iv,data_1$phyId)[2,4]
+        p_2sls_1[i]<-s_iv$coefficients[2,4]
+        
+        
+        ## OLS adjusted the measured covariates
+        fit_lm_bias<-lm(out~txA+gender+dosage,data=data)
+        s_bias<- summary(fit_lm_bias)
+        
+        ci_bias<- confint(fit_lm_bias)
+        ci_bias_lower[i]<- ci_bias[2,1]
+        ci_bias_upper[i]<- ci_bias[2,2]
+        
+        coef_bias[i]<- s_bias$coefficients[2,1]
+        lm_sd[i]<- s_bias$coefficients[2,2]
+        ## cluster robust se
+        
+        lm_sd_r[i]<-cluster.robust.se(fit_lm_bias,phyId)[2,2]
+        
+        fit_lm_true<- lm(out~txA+gender+dosage+un,data=data)
+        s_true<- summary(fit_lm_true)
+        coef_true[i]<- s_true$coefficients[2,1]
+        ### unadjusted OLS
+        
+        fit_lm_un<- lm(out~ txA, data=data)
+        s_un<- summary(fit_lm_un)
+        coef_un[i]<- s_un$coefficients[2,1]
+        
+        c[i]<-cov(data_1$ppp,data_1$gender)/cov(data_1$ppp,data_1$txA)
+        c1[i]<-cov(data_1$ppp,data_1$dosage)/cov(data_1$ppp,data_1$txA)
+        c2[i]<-cov(data_1$ppp,data_1$un)/cov(data_1$ppp,data_1$txA)
+        
+        prop_complier[i]<- (w1+w0)/nrow(data)
+        
+      }
+      
+      
+      cnt[j]<-nrow(data) ## count valid iv
+      p_2sls[j]<- mean(na.omit(p_2sls_1))
+      p_2sls_r[j]<- mean(na.omit(p_2sls_r_1))
+      power_2sls[j]<-sum((na.omit(p_2sls_1))<0.05)
+      power_2sls_r[j]<- sum((na.omit(p_2sls_r_1))<0.05)
+      bias_iv_1[j]<- mean(na.omit(c))
+      bias_iv_2[j]<- mean(na.omit(c1))
+      bias_iv_3[j]<- mean(na.omit(c2))
+      sd_iv[j]<- mean(na.omit(iv_sd))
+      sd_ols[j]<- mean(na.omit(lm_sd))
+      sd_iv_r[j]<- mean(na.omit(iv_sd_r))
+      sd_ols_r[j]<- mean(na.omit(lm_sd_r))
+      
+      
+      cov_ols[j]<- (sum((na.omit(ci_bias_lower)<=0.1)&(na.omit(ci_bias_upper)>=0.1)))
+      
+      cov_iv[j]<- (sum((na.omit(ci_iv_lower)<= 0.1)&(na.omit(ci_iv_upper) >= 0.1)))
+      
+      # cov_gmm[j]<- (sum((na.omit(ci_gmm_lower)<= 0.1)&(na.omit(ci_gmm_upper) >= 0.1)))
+      
+      ## true_or<- biased_OR[0]
+      ci_lower[j]<- mean(na.omit(ci_iv_lower))
+      ci_upper[j]<- mean(na.omit(ci_iv_upper))
+      ci_lower_lm[j]<- mean(na.omit(ci_bias_lower))
+      ci_upper_lm[j]<- mean(na.omit(ci_bias_upper) )
+      iv_coef[j]<- mean(na.omit(coef_iv))
+      lm_coef[j]<- mean(na.omit(coef_bias))
+      un_coef[j]<- mean(na.omit(coef_un))
+      true_coef[j]<- mean(na.omit(coef_true))
+      iv_strength[j]<-mean(na.omit(w_iv))
+      prop_com[j]<- mean(na.omit(prop_complier))
+      para[j]=gamma2
+      gamma2=gamma2+0.02
+      
+      
+    }
+    
+    df<- data.frame(sim, para,prop_com,sd_iv,sd_iv_r,sd_ols,sd_ols_r,lm_coef, un_coef,iv_coef,iv_strength,cov_ols,cov_iv,p_2sls,p_2sls_r,bias_iv_1,bias_iv_2,bias_iv_3,ci_lower,ci_upper,ci_lower_lm,ci_upper_lm)
+    df<- df %>% mutate(per_bias_iv=abs((0.1-iv_coef)/abs(0.1)))%>% mutate(per_bias_ols=abs((0.1-lm_coef)/abs(0.1)))
+    df<- df%>% mutate(cov_ols=round(cov_ols/sim,4)) %>% mutate(cov_iv=round(cov_iv/sim,4))
+    df<-df %>% mutate(power_2sls_r=round(power_2sls_r/sim,4))
+    ##df<-
+    
+    return(df)
+    
+  }
+
+## proportion PPP
+  
+my_simulation_prior_prop<- function(gamma2){
+    ### gamma2 controls the unmeasured confounders
+    
+    set.seed(324)
+    ## define the value of PPP
+    ppp_10<- c(0,1)
+    ppp_10<- sample(ppp_10,cnt_phy,replace=TRUE,prob=c(0.3,0.7))
+    ppp_10<- rep(ppp_10,times=n.pp)
+    
+    # define the variables that store the values
+    
+    iv_strength<- c(rep(NA,20))
+    cov_iv<- c(rep(NA,20))
+    cov_ols<- c(rep(NA,20))
+    iv_coef<- c(rep(NA,20))
+    lm_coef<- c(rep(NA,20))
+    un_coef<- c(rep(NA,20))
+    # true_coef<- c(rep(NA,20))
+    cnt<- c(rep(NA,20))
+    p_2sls<- c(rep(NA,20))
+    bias_iv_1<-c(rep(NA,20))
+    bias_iv_2<-c(rep(NA,20))
+    bias_iv_3<-c(rep(NA,20))
+    sd_iv<- c(rep(NA,20))
+    sd_iv_r<- c(rep(NA,20))
+    sd_ols<- c(rep(NA,20))
+    sd_ols_r<- c(rep(NA,20))
+    p_2sls_r<- c(rep(NA,20))
+    power_2sls<- c(rep(NA,20))
+    power_2sls_r<- c(rep(NA,20))
+    ci_lower<- c(rep(NA,20))
+    ci_upper<- c(rep(NA,20))
+    true_coef<- c(rep(NA,20))
+    para<- c(rep(NA,20))
+    for ( j in 1:20){
+      n_1<-0
+      coef_iv<- c(rep(NA,sim))
+      coef_bias<- c(rep(NA,sim))
+      coef_un<- c(rep(NA,sim))
+      coef_true<- c(rep(NA,sim))
+      ci_iv_lower<-c(rep(NA,sim))
+      ci_iv_upper<- c(rep(NA,sim))
+      ci_bias_lower<- c(rep(NA,sim))
+      ci_bias_upper<-  c(rep(NA,sim))
+      w_iv<- c(rep(NA,sim)) # iv strength
+      
+      p_2sls_1<-c(rep(NA,sim))
+      c<-c(rep(NA,sim))
+      c1<-c(rep(NA,sim))
+      c2<-c(rep(NA,sim))
+      iv_sd<-c(rep(NA,sim))
+      iv_sd_r<- c(rep(NA,sim))
+      lm_sd<- c(rep(NA,sim))
+      lm_sd_r<- c(rep(NA,sim))
+      p_2sls_r_1<- c(rep(NA,sim))
+      
+      
+      for( i in 1: sim){
+        
+        gender <- rbinom(sum(n.pp), 1, 0.6)# gender
+        dosage<- rnorm(sum(n.pp),13,2)
+        un<- rnorm(sum(n.pp), 1,0.5)  ## unmeasured covariates
+        ptxA<- (0.4*ppp_10+0.02*dosage+ 0.053*gender+0.15*un)/1-0.04
+        #summary(ptxA)
+        ptxA<- ifelse(ptxA>1,0.99,ifelse(ptxA<0,0,ptxA))## make sure the ptxA is between 1 and 0
+        
+        txA <- rbinom(sum(n.pp), 1,ptxA)### ppp and exposure....
+        pout<-(0.10*txA+0.01*dosage+0.04*gender+gamma2*un)/1-0.01
+        pout<- ifelse(pout>1,0.99,ifelse(pout<0,0,pout))# make sure the pout is between 1 and 0
+        
+        out <- rbinom(sum(n.pp), 1,pout)
+        
+        data<- as.data.frame(cbind(phyId,patId, txA,out, gender,dosage, un))
+        ### calculate the proxy for PPP
+        data <- data %>% group_by(data$phyId) %>% mutate(cnt=max(patId)) %>% mutate(ppp= sum(txA)/cnt)
+        
+        s1<- summary(lm(un~ppp,data=data))
+        s2<- summary(lm(txA~ppp,data=data))
+        s3<- summary(lm(out~ppp,data=subset(data,txA==0)))
+        s3_1<- summary(lm(out~ppp,data=subset(data,txA==1)))
+        s4<- summary(lm(un~out,data=data))
+        p_un<- s1$coefficients[2,4]
+        p_x<-s2$coefficients[2,4]
+        p_y<-s3$coefficients[2,4]
+        p_y_1<-s3_1$coefficients[2,4]
+        
+        
+        if (p_un>0.05& p_x<0.05& p_y>0.1& p_y_1>0.1) ## 1. iv not associated with unmeasured confounder; iv does not impact the outcome directly;
+        {
+          
+          ### 2SLS estimates
+          fit_iv<- ivreg(out~txA+gender+dosage|ppp+gender+dosage,data=data)
+          ci_iv<- confint(fit_iv)
+          s_iv<- summary(fit_iv,diagnostic=TRUE)
+          ci_iv_lower[i]<- ci_iv[2,1]
+          ci_iv_upper[i]<- ci_iv[2,2]
+          
+          coef_iv[i]<- s_iv$coefficients[2,1]
+          w_iv[i]<- s_iv$diagnostics[1,3]## IV strength(F-statistics)
+          iv_sd[i]<- s_iv$coefficients[2,2] ## standard deviation for 2sls
+          data_1<- na.omit(data)
+          iv_sd_r[i]<- cluster.robust.se(fit_iv,data_1$phyId)[2,2]
+          p_2sls_r_1[i]<- cluster.robust.se(fit_iv,data_1$phyId)[2,4]
+          p_2sls_1[i]<-s_iv$coefficients[2,4]
+          
+          
+          ## OLS adjusted the measured covariates
+          fit_lm_bias<-lm(out~txA+gender+dosage,data=data)
+          s_bias<- summary(fit_lm_bias)
+          
+          ci_bias<- confint(fit_lm_bias)
+          ci_bias_lower[i]<- ci_bias[2,1]
+          ci_bias_upper[i]<- ci_bias[2,2]
+          
+          coef_bias[i]<- s_bias$coefficients[2,1]
+          lm_sd[i]<- s_bias$coefficients[2,2]
+          ## cluster robust se
+          
+          lm_sd_r[i]<-cluster.robust.se(fit_lm_bias,phyId)[2,2]
+          
+          fit_lm_true<- lm(out~txA+gender+dosage+un,data=data)
+          s_true<- summary(fit_lm_true)
+          coef_true[i]<- s_true$coefficients[2,1]
+          ### unadjusted OLS
+          
+          fit_lm_un<- lm(out~ txA, data=data)
+          s_un<- summary(fit_lm_un)
+          coef_un[i]<- s_un$coefficients[2,1]
+          
+          c[i]<-cov(data_1$ppp,data_1$gender)/cov(data_1$ppp,data_1$txA)
+          c1[i]<-cov(data_1$ppp,data_1$dosage)/cov(data_1$ppp,data_1$txA)
+          c2[i]<-cov(data_1$ppp,data_1$un)/cov(data_1$ppp,data_1$txA)
+          n_1=n_1+1
+          
+        }else{NULL}
+      }
+      
+      cnt[j]<-n_1 ## count valid iv
+      p_2sls[j]<- mean(na.omit(p_2sls_1))
+      p_2sls_r[j]<- mean(na.omit(p_2sls_r_1))
+      power_2sls[j]<-sum((na.omit(p_2sls_1))<0.05)
+      power_2sls_r[j]<- sum((na.omit(p_2sls_r_1))<0.05)
+      bias_iv_1[j]<- mean(na.omit(c))
+      bias_iv_2[j]<- mean(na.omit(c1))
+      bias_iv_3[j]<- mean(na.omit(c2))
+      sd_iv[j]<- mean(na.omit(iv_sd))
+      sd_ols[j]<- mean(na.omit(lm_sd))
+      sd_iv_r[j]<- mean(na.omit(iv_sd_r))
+      sd_ols_r[j]<- mean(na.omit(lm_sd_r))
+      
+      
+      cov_ols[j]<- (sum((na.omit(ci_bias_lower)<=0.1)&(na.omit(ci_bias_upper)>=0.1)))
+      
+      cov_iv[j]<- (sum((na.omit(ci_iv_lower)<= 0.1)&(na.omit(ci_iv_upper) >= 0.1)))
+      ci_lower[j]<- mean(na.omit(ci_iv_lower))
+      ci_upper[j]<- mean(na.omit(ci_iv_upper))
+      iv_coef[j]<- mean(na.omit(coef_iv))
+      lm_coef[j]<- mean(na.omit(coef_bias))
+      un_coef[j]<- mean(na.omit(coef_un))
+      true_coef[j]<- mean(na.omit(coef_true))
+      iv_strength[j]<-mean(na.omit(w_iv))
+      
+      para[j]=gamma2
+      gamma2=gamma2+0.02
+      
+    }
+    
+    df<- data.frame(cnt, para,sd_iv,sd_iv_r,sd_ols,sd_ols_r,lm_coef, un_coef,iv_coef,iv_strength,cov_ols,cov_iv,p_2sls,p_2sls_r,bias_iv_1,bias_iv_2,bias_iv_3,ci_lower,ci_upper)
+    df<- df %>% mutate(per_bias_iv=abs((0.1-iv_coef)/abs(0.1)))%>% mutate(per_bias_ols=abs((0.1-lm_coef)/abs(0.1)))
+    df<- df%>% mutate(cov_ols=round(cov_ols/cnt,4)) %>% mutate(cov_iv=round(cov_iv/cnt,4))
+    df<- df%>% mutate(power_2sls=round(power_2sls/cnt,4))
+    df<-df %>% mutate(power_2sls_r=round(power_2sls_r/cnt,4))
+    
+    return(df)
+    
+  }
+### True PPP
+my_simulation_prior_true<- function(gamma2){
+    ### gamma2 controls the unmeasured confounders
+    
+    set.seed(324)
+    ## define the value of PPP
+    ppp_10<- c(0,1)
+    ppp_10<- sample(ppp_10,cnt_phy,replace=TRUE,prob=c(0.3,0.7))
+    ppp_10<- rep(ppp_10,times=n.pp)
+    
+    # define the variables that store the values
+    
+    iv_strength<- c(rep(NA,20))
+    cov_iv<- c(rep(NA,20))
+    cov_ols<- c(rep(NA,20))
+    iv_coef<- c(rep(NA,20))
+    lm_coef<- c(rep(NA,20))
+    un_coef<- c(rep(NA,20))
+    
+    cnt<- c(rep(NA,20))
+    p_2sls<- c(rep(NA,20))
+    bias_iv_1<-c(rep(NA,20))
+    bias_iv_2<-c(rep(NA,20))
+    bias_iv_3<-c(rep(NA,20))
+    sd_iv<- c(rep(NA,20))
+    sd_iv_r<- c(rep(NA,20))
+    sd_ols<- c(rep(NA,20))
+    sd_ols_r<- c(rep(NA,20))
+    p_2sls_r<- c(rep(NA,20))
+    power_2sls<- c(rep(NA,20))
+    power_2sls_r<- c(rep(NA,20))
+    ci_lower<- c(rep(NA,20))
+    ci_upper<- c(rep(NA,20))
+    true_coef<- c(rep(NA,20))
+    para<- c(rep(NA,20))
+    for ( j in 1:20){
+      n_1<-0
+      coef_iv<- c(rep(NA,sim))
+      coef_bias<- c(rep(NA,sim))
+      coef_un<- c(rep(NA,sim))
+      coef_true<- c(rep(NA,sim))
+      ci_iv_lower<-c(rep(NA,sim))
+      ci_iv_upper<- c(rep(NA,sim))
+      ci_bias_lower<- c(rep(NA,sim))
+      ci_bias_upper<-  c(rep(NA,sim))
+      w_iv<- c(rep(NA,sim)) # iv strength
+      
+      p_2sls_1<-c(rep(NA,sim))
+      c<-c(rep(NA,sim))
+      c1<-c(rep(NA,sim))
+      c2<-c(rep(NA,sim))
+      iv_sd<-c(rep(NA,sim))
+      iv_sd_r<- c(rep(NA,sim))
+      lm_sd<- c(rep(NA,sim))
+      lm_sd_r<- c(rep(NA,sim))
+      p_2sls_r_1<- c(rep(NA,sim))
+      
+      
+      for( i in 1: sim){
+        
+        gender <- rbinom(sum(n.pp), 1, 0.6)# gender
+        dosage<- rnorm(sum(n.pp),13,2)
+        un<- rnorm(sum(n.pp), 1,0.5)  ## unmeasured covariates
+        ptxA<- (0.4*ppp_10+0.02*dosage+ 0.053*gender+0.15*un)/1-0.04
+        #summary(ptxA)
+        ptxA<- ifelse(ptxA>1,0.99,ifelse(ptxA<0,0,ptxA))## make sure the ptxA is between 1 and 0
+        
+        txA <- rbinom(sum(n.pp), 1,ptxA)### ppp and exposure....
+        pout<-(0.10*txA+0.01*dosage+0.04*gender+gamma2*un)/1-0.01
+        pout<- ifelse(pout>1,0.99,ifelse(pout<0,0,pout))# make sure the pout is between 1 and 0
+        
+        out <- rbinom(sum(n.pp), 1,pout)
+        
+        data<- as.data.frame(cbind(phyId,patId, txA,out, gender,dosage, un))
+        ### calculate the proxy for PPP
+        # CrossTable(data$out)
+        ## data<-data %>% group_by(phyId) %>% mutate(ppp= roll_sum(lag(txA),n,fill = NA,align = "right"))
+        data <- data %>%  mutate(ppp= ppp_10)
+        s1<- summary(lm(un~ppp,data=data))
+        s2<- summary(lm(txA~ppp,data=data))
+        #s2
+        s3<- summary(lm(out~ppp,data=subset(data,txA==0)))
+        s3_1<- summary(lm(out~ppp,data=subset(data,txA==1)))
+        s4<- summary(lm(un~out,data=data))
+        p_un<- s1$coefficients[2,4]
+        p_x<-s2$coefficients[2,4]
+        p_y<-s3$coefficients[2,4]
+        p_y_1<-s3_1$coefficients[2,4]
+        
+        
+        if (p_un>0.05& p_x<0.05& p_y>0.1& p_y_1>0.1) ## 1. iv not associated with unmeasured confounder; iv does not impact the outcome directly;
+          ##  if (p_un>0.05)
+        {
+          
+          ### 2SLS estimates
+          fit_iv<- ivreg(out~txA+gender+dosage|ppp+gender+dosage,data=data)
+          ci_iv<- confint(fit_iv)
+          
+          s_iv<- summary(fit_iv,diagnostic=TRUE)
+          ci_iv_lower[i]<- ci_iv[2,1]
+          ci_iv_upper[i]<- ci_iv[2,2]
+          
+          coef_iv[i]<- s_iv$coefficients[2,1]
+          w_iv[i]<- s_iv$diagnostics[1,3]## IV strength(F-statistics)
+          iv_sd[i]<- s_iv$coefficients[2,2] ## standard deviation for 2sls
+          data_1<- na.omit(data)
+          iv_sd_r[i]<- cluster.robust.se(fit_iv,data_1$phyId)[2,2]
+          p_2sls_r_1[i]<- cluster.robust.se(fit_iv,data_1$phyId)[2,4]
+          p_2sls_1[i]<-s_iv$coefficients[2,4]
+          
+          
+          ## OLS adjusted the measured covariates
+          fit_lm_bias<-lm(out~txA+gender+dosage,data=data)
+          s_bias<- summary(fit_lm_bias)
+          
+          ci_bias<- confint(fit_lm_bias)
+          ci_bias_lower[i]<- ci_bias[2,1]
+          ci_bias_upper[i]<- ci_bias[2,2]
+          
+          coef_bias[i]<- s_bias$coefficients[2,1]
+          lm_sd[i]<- s_bias$coefficients[2,2]
+          ## cluster robust se
+          
+          lm_sd_r[i]<-cluster.robust.se(fit_lm_bias,phyId)[2,2]
+          
+          fit_lm_true<- lm(out~txA+gender+dosage+un,data=data)
+          s_true<- summary(fit_lm_true)
+          coef_true[i]<- s_true$coefficients[2,1]
+          ### unadjusted OLS
+          
+          fit_lm_un<- lm(out~ txA, data=data)
+          s_un<- summary(fit_lm_un)
+          coef_un[i]<- s_un$coefficients[2,1]
+          
+          c[i]<-cov(data_1$ppp,data_1$gender)/cov(data_1$ppp,data_1$txA)
+          c1[i]<-cov(data_1$ppp,data_1$dosage)/cov(data_1$ppp,data_1$txA)
+          c2[i]<-cov(data_1$ppp,data_1$un)/cov(data_1$ppp,data_1$txA)
+          
+          
+          
+          n_1=n_1+1
+          
+        }else{NULL}
+      }
+      
+      
+      cnt[j]<-n_1 ## count valid iv
+      p_2sls[j]<- mean(na.omit(p_2sls_1))
+      p_2sls_r[j]<- mean(na.omit(p_2sls_r_1))
+      power_2sls[j]<-sum((na.omit(p_2sls_1))<0.05)
+      power_2sls_r[j]<- sum((na.omit(p_2sls_r_1))<0.05)
+      bias_iv_1[j]<- mean(na.omit(c))
+      bias_iv_2[j]<- mean(na.omit(c1))
+      bias_iv_3[j]<- mean(na.omit(c2))
+      sd_iv[j]<- mean(na.omit(iv_sd))
+      sd_ols[j]<- mean(na.omit(lm_sd))
+      sd_iv_r[j]<- mean(na.omit(iv_sd_r))
+      sd_ols_r[j]<- mean(na.omit(lm_sd_r))
+      cov_ols[j]<- (sum((na.omit(ci_bias_lower)<=0.1)&(na.omit(ci_bias_upper)>=0.1)))
+      cov_iv[j]<- (sum((na.omit(ci_iv_lower)<= 0.1)&(na.omit(ci_iv_upper) >= 0.1)))
+      ci_lower[j]<- mean(na.omit(ci_iv_lower))
+      ci_upper[j]<- mean(na.omit(ci_iv_upper))
+      iv_coef[j]<- mean(na.omit(coef_iv))
+      lm_coef[j]<- mean(na.omit(coef_bias))
+      un_coef[j]<- mean(na.omit(coef_un))
+      true_coef[j]<- mean(na.omit(coef_true))
+      iv_strength[j]<-mean(na.omit(w_iv))
+      
+      para[j]=gamma2
+      gamma2=gamma2+0.02
+      
+    }
+    
+    df<- data.frame(cnt, para,sd_iv,sd_iv_r,sd_ols,sd_ols_r,lm_coef, un_coef,iv_coef,iv_strength,cov_ols,cov_iv,p_2sls,p_2sls_r,bias_iv_1,bias_iv_2,bias_iv_3,ci_lower,ci_upper)
+    df<- df %>% mutate(per_bias_iv=abs((0.1-iv_coef)/abs(0.1)))%>% mutate(per_bias_ols=abs((0.1-lm_coef)/abs(0.1)))
+    df<- df%>% mutate(cov_ols=round(cov_ols/cnt,4)) %>% mutate(cov_iv=round(cov_iv/cnt,4))
+    df<- df%>% mutate(power_2sls=round(power_2sls/cnt,4))
+    df<-df %>% mutate(power_2sls_r=round(power_2sls_r/cnt,4))
+    
+    return(df)
+    
+  }
+
+  c_ols<-  read_excel("result_429_big.xlsx",1) %>% mutate(id="ols") # %>% subset(select=c(2,16,17))%>% rename("per_bias"=per_bias_ols)
+  c_1<- read_excel("result_429_big.xlsx",1) %>% mutate(id="prior 1") #  %>% subset(select=c(2,15,17))
+  c_2<- read_excel("result_429_big.xlsx",2)%>%  mutate(id="prior 2")  #%>% subset(select=c(2,15,17))
+  c_3<- read_excel("result_429_big.xlsx",3) %>% mutate(id="prior 3") #%>% subset(select=c(2,15,17))
+  c_4<- read_excel("result_429_big.xlsx",4) %>% mutate(id="prior 4")  #%>% subset(select=c(2,15,17))
+  c_true<- read_excel("true_1.xlsx")%>% mutate(id="true preference")  #%>% subset(select=c(2,15,17))
+  c_prop<-read_excel("prop.xlsx") %>% mutate(id="proportion preference") #%>% subset(select=c(2,15,17))
+  
+  c1_s<- read_excel("result_813_620.xlsx",1)
+  c2_s<- read_excel("result_813_620.xlsx",2)
+  c3_s<-read_excel("result_813_620.xlsx",3)
+  c4_s<- read_excel("result_813_620.xlsx",4)
+  true_small<- read_excel("true_prop.xlsx",1)
+  prop_small<- read_excel("true_prop.xlsx",3)
+  
+### bias plot, Figure 9 in chapter 7
+  
+bias_plot<-function(data){
+    c_ols<- data %>% mutate(id="ols")  %>% subset(select=c("para","per_bias_ols","id"))%>% rename("per_bias"=per_bias_ols)
+    c_1<- data%>% mutate(id="prior 1")   %>% subset(select=c("para","per_bias_iv","id"))%>% rename("per_bias"=per_bias_iv)
+    # c_2<- c_2%>% mutate(id="prior 2")  %>% subset(select=c("para","per_bias_iv","id"))%>% rename("per_bias"=per_bias_iv)
+    ## c_3<-  c_3 %>% mutate(id="prior 3") %>% subset(select=c("para","per_bias_iv","id"))%>% rename("per_bias"=per_bias_iv)
+    #c_4<- c_4 %>% mutate(id="prior 4")  %>% subset(select=c("para","per_bias_iv","id"))%>% rename("per_bias"=per_bias_iv)
+    #c_true<-c_true %>%  mutate(id="true preference")  %>% subset(select=c("para","per_bias_iv","id"))%>% rename("per_bias"=per_bias_iv)
+    #c_prop<-c_prop %>%  mutate(id="proportion preference") %>% subset(select=c("para","per_bias_iv","id"))%>% rename("per_bias"=per_bias_iv)
+    data_m<- rbind(c_1,c_ols)
+    plot_id<-data_m %>% filter(para>0.51)
+    
+    ##bias_plot<- ggplot(data=data_m,aes(x=para, y=per_bias*100,color=id))+geom_line(size=0.5)+geom_point()+ylab("percent bias")+ xlab("??2(unmeasured confounding level)")+ theme(legend.position="none")+ylim(0,100)+ geom_label_repel(aes(label=id), size=4, data=plot_id) + labs(subtitle="OLS estimates vs. IV estimates") + theme(legend.position = "None")
+    bias_plot<- ggplot(data=data_m,aes(x=para, y=per_bias*100,color=id))+geom_line(size=0.5)+geom_point()+ylab("percent bias %")+xlab(~paste(gamma[2],"(unmeasured confounding level)")) + ylim(0,100)+labs(subtitle="OLS estimates vs. IV estimates") + theme(legend.position = "bottom")
+    return(bias_plot)
+  }
+biasplot<- function(c_1,c_2,c_3,c_4,c_true,c_prop){
+    c_ols<- c_1 %>% mutate(id="ols")  %>% subset(select=c("para","per_bias_ols","id"))%>% rename("per_bias"=per_bias_ols)
+    c_1<- c_1%>% mutate(id="prior 1")   %>% subset(select=c("para","per_bias_iv","id"))%>% rename("per_bias"=per_bias_iv)
+    c_2<- c_2%>% mutate(id="prior 2")  %>% subset(select=c("para","per_bias_iv","id"))%>% rename("per_bias"=per_bias_iv)
+    c_3<-  c_3 %>% mutate(id="prior 3") %>% subset(select=c("para","per_bias_iv","id"))%>% rename("per_bias"=per_bias_iv)
+    c_4<- c_4 %>% mutate(id="prior 4")  %>% subset(select=c("para","per_bias_iv","id"))%>% rename("per_bias"=per_bias_iv)
+    c_true<-c_true %>%  mutate(id="true preference")  %>% subset(select=c("para","per_bias_iv","id"))%>% rename("per_bias"=per_bias_iv)
+    c_prop<-c_prop %>%  mutate(id="proportion preference") %>% subset(select=c("para","per_bias_iv","id"))%>% rename("per_bias"=per_bias_iv)
+    data_m<- rbind(c_1,c_2,c_3,c_4,c_true,c_prop,c_ols)
+    plot_id<-data_m %>% filter(para>0.37)
+    bias_plot<- ggplot(data=data_m,aes(x=para, y=per_bias*100,color=id))+geom_line(size=0.5)+geom_point()+ylab("percent bias %")+ xlab(expression(gamma[2]~"(unmeasured confounding level)")) + ylim(0,100)+labs(subtitle="OLS estimates vs. IV estimates") + theme(legend.position = "bottom")
+    return(bias_plot)
+    
+  }
+bias_plot_small<- biasplot(c1_s,c2_s,c3_s,c4_s,true_small,prop_small)
+bias_plot_small<- bias_plot_small+ggtitle("sample size=620")
+legend_bias<- get_legend(bias_plot_small)
+bias_plot_small<- bias_plot_small+theme(legend.position = "none")
+bias_plot<- biasplot(c_1,c_2,c_3,c_4,c_true,c_prop)
+bias_plot<- bias_plot+ggtitle("sample size=2452")+theme(legend.position = "none")
+biasplot_v<-grid.arrange(bias_plot_small, bias_plot,legend_bias,
+                           ncol=2,nrow=2,layout_matrix = rbind(c(1,2),c(3,3)),
+                           widths = c(2.7, 2.7), heights = c(2, 0.5))
+  
+#### coverage plot ,Figure 10 in chapter 7
+  covplot<- function(c_1,c_2,c_3,c_4,c_true,c_prop){
+    cols<- c_1 %>% mutate(id="ols")  %>% subset(select=c("para","cov_ols","id"))%>% rename("coverage_rate"=cov_ols)
+    c1<- c_1%>% mutate(id="prior 1")   %>% subset(select=c("para","cov_iv","id"))%>% rename("coverage_rate"=cov_iv)
+    c2<- c_2%>% mutate(id="prior 2")  %>% subset(select=c("para","cov_iv","id"))%>% rename("coverage_rate"=cov_iv)
+    c3<-  c_3 %>% mutate(id="prior 3") %>% subset(select=c("para","cov_iv","id"))%>% rename("coverage_rate"=cov_iv)
+    c4<- c_4 %>% mutate(id="prior 4")  %>% subset(select=c("para","cov_iv","id"))%>% rename("coverage_rate"=cov_iv)
+    ctrue<-c_true %>%  mutate(id="true preference")  %>% subset(select=c("para","cov_iv","id"))%>% rename("coverage_rate"=cov_iv)
+    cprop<-c_prop %>%  mutate(id="proportion preference") %>% subset(select=c("para","cov_iv","id"))%>% rename("coverage_rate"=cov_iv)
+    data_m<- rbind(c1,c2,c3,c4,ctrue,cprop,cols)
+    plot_id<-data_m %>% filter(para>0.37)
+    bias_plot<- ggplot(data=data_m,aes(x=para, y=coverage_rate,color=id))+geom_line(size=0.5)+geom_point()+ylab("coverage rate")+ xlab(expression(gamma[2]~'(unmeasured confounding level)'))+ylim(0,1)+ labs(subtitle="OLS coverage rate vs. IV coverage rate")
+    bias_plot<- bias_plot+ geom_hline(yintercept=0.95,   color = "blue", size=0.5) +theme(legend.position = "bottom")
+    return(bias_plot)
+  }
+  covplot_l<- covplot(c_1,c_2,c_3,c_4,c_true,c_prop)+ ggtitle("Sample size=2452")
+  covplot_s<- covplot(c1_s,c2_s,c3_s,c4_s,true_small,prop_small) +ggtitle("Sample size=620")+theme(legend.position = "none")
+  covplot_l<- covplot(c_1,c_2,c_3,c_4,c_true,c_prop)
+  covplot_s<- covplot(c1_s,c2_s,c3_s,c4_s,true_small,prop_small)
+  legend<- get_legend(covplot_l)
+  covplot_l<-covplot_l+theme(legend.position = "none")
+  covplot_s<-covplot_s+theme(legend.position = "none")
+  
+  #ggarrange(covplot_s,covplot_l,nrow = 1)
+  covplot_1<- grid.arrange(covplot_s, covplot_l,legend,
+                           ncol=2,nrow=2,layout_matrix = rbind(c(1,2), c(3,3)),widths = c(2.7, 2.7), heights = c(1.5, 0.5))
+  ### mapping p-value and IV strength , Figure 11 in chapter 7
+  
+  p_iv_plot<- function (c_1,c_2,c_3,c_4,c_true,c_prop){
+    c_1<-c_1 %>%  subset(select=c("para","p_2sls","iv_strength")) %>% mutate(id="prior 1 prescription")
+    c_2<- c_2 %>% subset(select=c("para","p_2sls","iv_strength")) %>% mutate(id="prior 2 prescriptions")
+    c_3<- c_3 %>% subset(select=c("para","p_2sls","iv_strength")) %>% mutate(id="prior 3 prescriptions")
+    c_4<- c_4 %>% subset(select=c("para","p_2sls","iv_strength")) %>% mutate(id="prior 4 prescriptions")
+    c_true<- c_true %>% subset(select=c("para","p_2sls","iv_strength")) %>% mutate(id="true preference")
+    c_prop<- c_prop %>% subset(select=c("para","p_2sls","iv_strength")) %>% mutate(id="proportion preference")
+    data_mm<- rbind(c_1,c_2,c_3,c_4,c_true,c_prop)
+    p_value_plot<- ggplot(data=data_mm,aes(x=para, y=p_2sls,color=(iv_strength),shape=id))+geom_line(size=0.5)+geom_point(size=2)+ylab("p value")+ xlab(expression(gamma[2]~'(unmeasured confounding level)'))+ theme(legend.position="bottom")+labs(shape="Proxy for PPP",color="Strength of IV (F-statistics)",subtitle = "P value of different IV strength")+ scale_fill_continuous(type  = "viridis")
+    #+scale_color_gradient(low='blue', high='black',limits=c(0,800))
+    p_value_plot<- p_value_plot+ylim(c(0,0.6))+geom_hline(yintercept=0.05,   color = "red",type="dash", size=0.5) +annotate(geom="text", x=0.3, y=0.1, label="p value=0.05",
+                                                                                                                            color="red")
+    return(p_value_plot)
+  }
+  p_iv_plot_small<- p_iv_plot(c1_s,c2_s,c3_s,c4_s,true_small,prop_small)
+  p_iv_plot_small<- p_iv_plot_small+ ggtitle("Sample size=620")
+  p_iv_plot_small<- p_iv_plot_small+theme(legend.position = "None")
+  
+  p_plot<- p_iv_plot(c_1,c_2,c_3,c_4,c_true,c_prop)
+  p_plot<- p_plot+ggtitle("Sample size=2452")
+  legend_p<- get_legend(p_plot)
+  p_plot<- p_plot+ggtitle("Sample size=2452")+theme(legend.position = "None")
+  
+  pplot<- grid.arrange(p_iv_plot_small, p_plot,legend_p,
+                       ncol=2,nrow=2,layout_matrix = rbind(c(1,2), c(3,3)),
+                       widths = c(2.7, 2.7), heights = c(2.2, 0.5))
+  
+  biasplot_v<- grid.arrange(bias_plot_small,bias_plot,nrow=1,ncol=2)
+  covplot_1<- grid.arrange(covplot_s, covplot_l,ncol=2,nrow=1)
+  grid.arrange(biasplot_v, covplot_1,legend,
+               ncol=1,nrow=3,layout_matrix = rbind(c(1,1,1)),widths = c(2.7), heights = c(1.5,1.5, 0.5))
+  grid.arrange(biasplot_v, covplot_1,legend,
+               ncol=1,nrow=3,heights=c(1.5,1.5,0.5))
+  ### CI plots,  Figure 12 in Chapter 7
+  ci_robust_n<- function(coef, sd){
+    
+    ci_lower = coef - qnorm(0.975) * sd
+    ci_upper = coef + qnorm(0.975) * sd
+    return(cbind(ci_lower,ci_upper))
+    
+  }
+  ci_data_extract<- function(file,n){
+    
+    data<- read_xlsx(file,n) %>% subset(select=c("para","sd_iv_r","sd_ols_r","lm_coef","iv_coef"))
+    data<- data %>% mutate(ci_ols_lower=ci_robust_n(data$lm_coef,data$sd_ols_r)[,1],ci_ols_upper=ci_robust_n(data$lm_coef,data$sd_ols_r)[,2])
+    data<- data %>% mutate(ci_iv_lower=ci_robust_n(data$iv_coef,data$sd_iv_r)[,1],ci_iv_upper=ci_robust_n(data$iv_coef,data$sd_iv_r)[,2])
+    
+    return(data)
+  }
+  data_ex<- function(file,n){
+    data<- read_xlsx(file,n) %>% subset(select=c("para","sd_iv_r","sd_ols_r","lm_coef","iv_coef"))
+    return(data)
+  }
+  ci_true<- ci_data_extract("true_prop.xlsx",2) %>% mutate(id="true preference") %>%subset(select=c("id","para","iv_coef","ci_iv_lower","ci_iv_upper")) %>% rename("ci_upper"=ci_iv_upper) %>%rename("ci_lower"=ci_iv_lower) %>%rename("coef"=iv_coef)
+  ci_prop<- ci_data_extract("true_prop.xlsx",4) %>% mutate(id="proportional preference")  %>%subset(select=c("id","para","iv_coef","ci_iv_lower","ci_iv_upper")) %>% rename("ci_upper"=ci_iv_upper) %>%rename("ci_lower"=ci_iv_lower) %>%rename("coef"=iv_coef)
+  ci_true_s<- ci_data_extract("true_prop.xlsx",1) %>% mutate(id="true preference") %>%subset(select=c("id","para","iv_coef","ci_iv_lower","ci_iv_upper")) %>% rename("ci_upper"=ci_iv_upper) %>%rename("ci_lower"=ci_iv_lower) %>%rename("coef"=iv_coef)
+  ci_prop_s<- ci_data_extract("true_prop.xlsx",3) %>% mutate(id="proportional preference")  %>%subset(select=c("id","para","iv_coef","ci_iv_lower","ci_iv_upper")) %>% rename("ci_upper"=ci_iv_upper) %>%rename("ci_lower"=ci_iv_lower) %>%rename("coef"=iv_coef)
+  ci_true_l<- ci_data_extract("true_prop_l_t.xlsx",1) %>% mutate(id="true preference") %>%subset(select=c("id","para","iv_coef","ci_iv_lower","ci_iv_upper")) %>% rename("ci_upper"=ci_iv_upper) %>%rename("ci_lower"=ci_iv_lower) %>%rename("coef"=iv_coef)
+  ci_prop_l<- ci_data_extract("true_prop_l_t.xlsx",2) %>% mutate(id="proportional preference")  %>%subset(select=c("id","para","iv_coef","ci_iv_lower","ci_iv_upper")) %>% rename("ci_upper"=ci_iv_upper) %>%rename("ci_lower"=ci_iv_lower) %>%rename("coef"=iv_coef)
+  ci_true_t<- ci_data_extract("true_prop_l_t.xlsx",3) %>% mutate(id="true preference") %>%subset(select=c("id","para","iv_coef","ci_iv_lower","ci_iv_upper")) %>% rename("ci_upper"=ci_iv_upper) %>%rename("ci_lower"=ci_iv_lower) %>%rename("coef"=iv_coef)
+  ci_prop_t<- ci_data_extract("true_prop_l_t.xlsx",4) %>% mutate(id="proportional preference")  %>%subset(select=c("id","para","iv_coef","ci_iv_lower","ci_iv_upper")) %>% rename("ci_upper"=ci_iv_upper) %>%rename("ci_lower"=ci_iv_lower) %>%rename("coef"=iv_coef)
+  ci_ols<- ci_data_extract("result_813_2452.xlsx",1) %>% mutate(id="ols") %>%subset(select=c("id","para","lm_coef","ci_ols_lower","ci_ols_upper")) %>% rename("ci_upper"=ci_ols_upper) %>%rename("ci_lower"=ci_ols_lower) %>%rename("coef"=lm_coef)
+  ci_p1<- ci_data_extract("result_813_2452.xlsx",1) %>% mutate(id="prior 1") %>%subset(select=c("id","para","iv_coef","ci_iv_lower","ci_iv_upper")) %>% rename("ci_upper"=ci_iv_upper) %>%rename("ci_lower"=ci_iv_lower) %>%rename("coef"=iv_coef)
+  ci_p2<- ci_data_extract("result_813_2452.xlsx",2) %>% mutate(id="prior 2") %>%subset(select=c("id","para","iv_coef","ci_iv_lower","ci_iv_upper")) %>% rename("ci_upper"=ci_iv_upper) %>%rename("ci_lower"=ci_iv_lower) %>%rename("coef"=iv_coef)
+  ci_p3<- ci_data_extract("result_813_2452.xlsx",3) %>% mutate(id="prior 3") %>% subset(select=c("id","para","iv_coef","ci_iv_lower","ci_iv_upper")) %>% rename("ci_upper"=ci_iv_upper) %>%rename("ci_lower"=ci_iv_lower) %>%rename("coef"=iv_coef)
+  ci_p4<- ci_data_extract("result_813_2452.xlsx",4) %>% mutate(id="prior 4") %>% subset(select=c("id","para","iv_coef","ci_iv_lower","ci_iv_upper")) %>% rename("ci_upper"=ci_iv_upper) %>%rename("ci_lower"=ci_iv_lower) %>%rename("coef"=iv_coef)
+  
+  ci_ols_s<- ci_data_extract("result_813_620.xlsx",1) %>% mutate(id="ols") %>%subset(select=c("id","para","lm_coef","ci_ols_lower","ci_ols_upper")) %>% rename("ci_upper"=ci_ols_upper) %>%rename("ci_lower"=ci_ols_lower) %>%rename("coef"=lm_coef)
+  ci_p1_s<- ci_data_extract("result_813_620.xlsx",1) %>% mutate(id="prior 1") %>%subset(select=c("id","para","iv_coef","ci_iv_lower","ci_iv_upper")) %>% rename("ci_upper"=ci_iv_upper) %>%rename("ci_lower"=ci_iv_lower) %>%rename("coef"=iv_coef)
+  ci_p2_s<- ci_data_extract("result_813_620.xlsx",2) %>% mutate(id="prior 2") %>%subset(select=c("id","para","iv_coef","ci_iv_lower","ci_iv_upper")) %>% rename("ci_upper"=ci_iv_upper) %>%rename("ci_lower"=ci_iv_lower) %>%rename("coef"=iv_coef)
+  ci_p3_s<- ci_data_extract("result_813_620.xlsx",3) %>% mutate(id="prior 3") %>% subset(select=c("id","para","iv_coef","ci_iv_lower","ci_iv_upper")) %>% rename("ci_upper"=ci_iv_upper) %>%rename("ci_lower"=ci_iv_lower) %>%rename("coef"=iv_coef)
+  ci_p4_s<- ci_data_extract("result_813_620.xlsx",4) %>% mutate(id="prior 4") %>% subset(select=c("id","para","iv_coef","ci_iv_lower","ci_iv_upper")) %>% rename("ci_upper"=ci_iv_upper) %>%rename("ci_lower"=ci_iv_lower) %>%rename("coef"=iv_coef)
+  
+  data_2452<- rbind(ci_ols,ci_p1,ci_p2,ci_p3,ci_p4,ci_true,ci_prop)
+  data_620<- rbind(ci_ols_s,ci_p1_s,ci_p2_s,ci_p3_s,ci_p4_s,ci_true_s,ci_prop_s)
+  data_2452$id<- factor(data_2452$id,levels=c("ols","prior 1","prior 2","prior 3","prior 4","true preference","proportional preference"))
+  data_620$id<- factor(data_620$id,levels=c("ols","prior 1","prior 2","prior 3","prior 4","true preference","proportional preference"))
+  ci_plot_2452<-ggplot(data_2452, aes(x = para, y = coef) ) +
+    geom_point(size=1) +
+    geom_errorbar(aes(ymax = ci_upper, ymin = ci_lower))+xlim(-0.01,0.38+0.01)+ylim(-1,1)+xlab("γ2")+ylab("Estimates")+  facet_wrap(~id,scales = "free_x",nrow=7)+
+    geom_hline(yintercept=0,   color = "red",type="dash", size=0.2)+ggtitle("Sample size=2452")
+  ci_plot_620<-ggplot(data_620, aes(x = para, y = coef) ) +
+    geom_point(size=1) +
+    geom_errorbar(aes(ymax = ci_upper, ymin = ci_lower))+xlim(-0.01,0.38+0.01)+ylim(-1,1)+xlab("γ2")+ylab("Estimates")+  facet_wrap(~id,scales = "free_x",nrow=7)+
+    geom_hline(yintercept=0,   color = "red",type="dash",size=0.2)+ggtitle("Sample size=620")
+
+  
+####################### Chapter 8 ############################
+
+##### research question 1
+set.seed(406)
+sim<- 1000
+cnt_phy<-80
+n.pp.lb <- 10 # Number of patients/physician, lower bound
+n.pp.ub <- 50 # Number of patients/physician, upper bound
+n.pp <- round(runif(cnt_phy, n.pp.lb, n.pp.ub))
+phyId <- rep(1:cnt_phy, times=n.pp)
+patId <- NULL
+for (i in 1:cnt_phy){patId <- c(patId, seq(1:n.pp[i]))} ## write in patient id 
+
+my_simulation_2stage_simple<- function( gamma2,n){
+    set.seed(324)
+    ppp_10<- c(0,1)
+    ppp_10<- sample(ppp_10,cnt_phy,replace=TRUE,prob=c(0.3,0.7))
+    ppp_10<- rep(ppp_10,times=n.pp)
+    
+    # define the variables that store the values 
+    coef_2sps<- c(rep(NA,20))
+    coef_2sri<- c(rep(NA,20))
+    
+    iv_strength<- c(rep(NA,20))
+    cov_2sri<- c(rep(NA,20))
+    cov_2sps<- c(rep(NA,20))
+    cov_glm<-c(rep(NA,20))
+    cnt<- c(rep(NA,20))
+    
+    cov_r_2sri<- c(rep(NA,20))
+    cov_r_2sps<- c(rep(NA,20))
+    cov_r_glm<- c(rep(NA,20))
+    glm_sd<- c(rep(NA,20))
+    glm_sd_r<- c(rep(NA,20))
+    sri_sd<- c(rep(NA,20))
+    sri_sd_r<- c(rep(NA,20))
+    sps_sd<- c(rep(NA,20))
+    sps_sd_r<- c(rep(NA,20))
+    p_2sps<-c(rep(NA,20))
+    p_2sri<- c(rep(NA,20))
+    p_glm<- c(rep(NA,20))
+    power_2sps<- c(rep(NA,20))
+    power_2sri<- c(rep(NA,20))
+    power_glm<- c(rep(NA,20))
+    
+    unbiased_OR<- c(rep(NA,20))
+    biased_OR<- c(rep(NA,20))
+    para<-c(rep(NA,20))
+    pc_1<-  c(rep(NA,20))
+    wc_1<- c(rep(NA,20))
+    wc_0<- c(rep(NA,20))
+    ci_lower_glm<- c(rep(NA,20))
+    ci_lower_2sps<- c(rep(NA,20))
+    ci_lower_2sri<- c(rep(NA,20))
+    ci_upper_glm<- c(rep(NA,20))
+    ci_upper_2sps<- c(rep(NA,20))
+    ci_upper_2sri<- c(rep(NA,20))
+    AUC<- c(rep(NA,20))
+    
+    for ( j in 1:20){
+      n_1=0
+      s_2sps<-c(rep(NA,sim))
+      s_2sri<-c(rep(NA,sim))
+      bias_OR<-c(rep(NA,sim))
+      ci_2sri_lower<-  c(rep(NA,sim))
+      ci_2sri_upper<-  c(rep(NA,sim))
+      ci_s_bias_lower<-  c(rep(NA,sim))
+      ci_s_bias_upper<-  c(rep(NA,sim))
+      ci_2sps_lower<-  c(rep(NA,sim))
+      ci_2sps_upper<-  c(rep(NA,sim))
+      w_iv<- c(rep(NA,sim)) # iv strength 
+      p_2sri_1<- c(rep(NA,sim))
+      p_2sps_1<- c(rep(NA,sim))
+      p_glm_1<- c(rep(NA,sim))
+      
+      ci_r_lower_glm<- c(rep(NA,sim))
+      ci_r_lower_2sps<- c(rep(NA,sim))
+      ci_r_lower_2sri<- c(rep(NA,sim))
+      ci_r_upper_glm<- c(rep(NA,sim))
+      ci_r_upper_2sps<- c(rep(NA,sim))
+      ci_r_upper_2sri<- c(rep(NA,sim))
+      sd_glm<- c(rep(NA,sim))
+      sd_glm_r<- c(rep(NA,sim))
+      sd_2sri<- c(rep(NA,sim))
+      sd_2sri_r<- c(rep(NA,sim))
+      sd_2sps<- c(rep(NA,sim))
+      sd_2sps_r<- c(rep(NA,sim))
+      
+      true_OR<- c(rep(NA,sim))
+      pc<-c(rep(NA,sim))
+      wc1<-c(rep(NA,sim))
+      wc0<-c(rep(NA,sim))
+      auc<-c (rep(NA,sim))
+      
+      
+      for( i in 1: sim){
+        
+        ### wc, pc ,
+        ## set.seed(324)
+        gender <- rbinom(sum(n.pp), 1, 0.6)# gender
+        dosage<- rnorm(sum(n.pp),13,2)
+        un<- rnorm(sum(n.pp), 1,2)  ## unmeasured covariates
+        
+        x<- 4*ppp_10+0.2*dosage+ 0.53*gender-3.5+1.1*un
+        ptxA= exp(x)/(1+exp(x))
+        txA <- rbinom(sum(n.pp), 1,ptxA)### ppp and exposure....
+        y<- -0.9*txA-0.02*dosage-0.6*gender-gamma2*un #  gamma2 controls the strength of unmeasured confounder
+        #summary(lm(txA~un,data=data))
+        pout <- exp(y)/(1+exp(y))
+        #pout<- 0.10*txA+0.01*dosage+0.04*gender+0.3*un
+        ## summary(pout)
+        out <- rbinom(sum(n.pp), 1,pout)
+        # out<- -0.9*txA-0.02*dosage-0.6*gender-gamma2*un
+        
+        data<- as.data.frame(cbind(phyId,patId, txA,out, gender,ppp_10,dosage, un))
+        data<-data %>% group_by(phyId) %>% mutate(ppp= roll_sum(lag(txA),n,fill = NA,align = "right"))
+        data<- as.data.frame(data)
+        s1<- summary(lm(un~ppp,data=data))
+        s2<- summary(lm(txA~ppp,data=data))
+        s3<- summary(lm(out~ppp,data=subset(data,txA==0)))
+        s3_1<- summary(lm(out~ppp,data=subset(data,txA==1)))
+        s4<- summary(lm(un~out,data=data))
+        p_un<- s1$coefficients[2,4]
+        p_x<-s2$coefficients[2,4]
+        p_y<-s3$coefficients[2,4]
+        p_y_1<-s3_1$coefficients[2,4]
+        
+        
+        ##   if (p_un>0.05& p_x<0.05& p_y>0.1&p_y_1>0.1) ## 1. iv not associated with unmeasured confounder; iv does not impact the outcome directly; 
+        if ( p_x<0.05) ## 1. iv not associated with unmeasured confounder; iv does not impact the outcome directly; 
+          
+        {
+          data_c<- data %>% subset(txA==ppp)
+          pc[i]<- nrow(data_c)/nrow(data)
+          wc1[i]=nrow(subset(data_c,out==1&txA==1))/nrow(data_c)
+          wc0[i]=nrow(subset(data_c,out==1&txA==0))/nrow(data_c)
+          fit_iv<- ivreg(out~txA+gender+dosage|ppp+gender+dosage,data=data)
+          ci_iv<- confint(fit_iv)
+          # summary(fit_iv,diagnostic=TRUE)
+          s_iv<- summary(fit_iv,diagnostic=TRUE)
+          w_iv[i]<- s_iv$diagnostics[1,3]## IV strength(F-statistics)
+          
+          ##adjusted measured covariates  using GLM 
+          data_n<- na.omit(data)
+          
+          mod<- glm(txA~ppp+dosage+gender+un,data=data_n,family = binomial("logit"))
+          predictions <- predict(mod, type = "response")
+          r<-suppressMessages(roc(data_n$txA,predictions))
+          auc[i]<- r$auc[1]
+          
+          s_OR<- glm(out~txA+gender+dosage+un, data=data,family = "binomial")
+          # coefci(s_OR, vcov. = vcovHC(s_OR, type = 'HC1'))
+          
+          true_OR[i]<- exp(s_OR$coefficients[2])
+          s_bias<- glm(out~txA+gender+dosage, data=data,family = "binomial")
+          #ci_s_bias<- suppressMessages(exp(confint(s_bias)))
+          bias_OR[i]<- exp(s_bias$coefficients[2])
+          #ci_s_bias_lower[i]<- ci_s_bias[2,1]
+          #ci_s_bias_upper[i]<- ci_s_bias[2,2]
+          ci_r_glm<- cluster.robust.se(s_bias,data$phyId)
+          s_glm<- summary(s_bias)
+          ci_r_lower_glm[i]<-exp(ci_robust(s_glm,ci_r_glm[2,2])[1])
+          ci_r_upper_glm[i]<-exp(ci_robust(s_glm,ci_r_glm[2,2])[2])
+          sd_glm[i]<-exp(s_glm$coef[2,2])
+          #sd_glm_r[i]<-exp(ci_r_glm[2,2])
+          p_glm_1[i]<-cluster.robust.se(s_bias,data$phyId)[2,4]
+          
+          # cluster.robust.se(s_OR,phyId)
+          #cluster.robust.se(s_bias,phyId)
+          
+          
+          ### 2SPS
+          #s1<- lm(txA~ppp+dosage+gender,data=na.omit(data))
+          s1<- glm(txA~ppp+dosage+gender,data=na.omit(data),family = "binomial")
+          phat<- predict.glm(s1,type='response')
+          s2.2sps<- glm(out~phat+dosage+gender,data=na.omit(data),family = "binomial")
+          
+          #ci_2sps<-  suppressMessages(exp(confint(s2.2sps)))
+          #ci_2sps_lower[i]<- ci_2sps[2,1]
+          #ci_2sps_upper[i]<- ci_2sps[2,2]
+          
+          s_2sps_1<- summary(s2.2sps)
+          data_1<- na.omit(data)
+          ci_r_2sps<- cluster.robust.se(s2.2sps,data_1$phyId)
+          ci_r_lower_2sps[i]<-exp(ci_robust(s_2sps_1,ci_r_2sps[2,2])[1])
+          ci_r_upper_2sps[i]<- exp(ci_robust(s_2sps_1,ci_r_2sps[2,2])[2])
+          p_2sps_1[i]<- cluster.robust.se(s2.2sps,data_1$phyId)[2,4]
+          s_2sps[i]<- exp(s_2sps_1$coefficients[2,1])
+          sd_2sps[i]<- exp(s_2sps_1$coefficients[2,2])
+          #sd_2sps_r[i]<- exp(ci_r_2sps[2,2])
+          ## 2SRI
+          #s2.2sri<- glm(out~rstandard(s1)+gender+dosage,data=na.omit(data),family = "binomial")
+          #r_s<- rstandard(s1)
+          r<- residuals.glm(s1,type="pearson")
+          s2.2sri<- glm(out~txA+residuals.glm(s1,type="pearson")+gender+dosage,data=na.omit(data),family = "binomial")
+          #ci_2sri<- suppressMessages(exp(confint(s2.2sri)))
+          #ci_2sri_lower[i]<- ci_2sri[2,1]
+          #ci_2sri_upper[i]<- ci_2sri[2,2]
+          s_2sri_1<- summary(s2.2sri)
+          s_2sri[i]<- exp(s_2sri_1$coefficients[2,1])
+          ci_r_2sri<- (cluster.robust.se(s2.2sri,data_1$phyId))
+          # names(ci_r_2sri)<-NULL
+          ci_r_lower_2sri[i]<-exp(ci_robust(s_2sri_1,ci_r_2sri[2,2])[1])
+          ci_r_upper_2sri[i]<-exp(ci_robust(s_2sri_1,ci_r_2sri[2,2])[2])
+          sd_2sri[i]<- exp(s_2sri_1$coefficients[2,2])
+          #sd_2sri_r[i]<- exp(ci_r_2sri[2,2])
+          p_2sri_1[i]<- cluster.robust.se(s2.2sri,data_1$phyId)[2,4]
+          
+          ####
+          
+          
+          n_1=n_1+1
+          
+          
+        }else{
+          NULL
+        }
+        
+      }
+      cnt[j]<-n_1 ## count valid iv
+      pc_1[j]<- mean(na.omit(pc))
+      wc_1[j]<- mean(na.omit(wc1))
+      wc_0[j]<- mean(na.omit(wc0))
+      
+      unbiased_OR[j]<- mean(na.omit(true_OR))
+      coef_2sps[j]<- mean(na.omit(s_2sps))
+      coef_2sri[j]<- mean(na.omit(s_2sri))
+      biased_OR[j]<- mean(na.omit(bias_OR))
+      
+      ci_lower_glm[j]<- mean(na.omit( ci_r_lower_glm))
+      ci_lower_2sps[j]<- mean(na.omit(ci_r_lower_2sps))
+      ci_lower_2sri[j]<- mean(na.omit(ci_r_lower_2sri))
+      ci_upper_glm[j]<- mean(na.omit(ci_r_upper_glm))
+      ci_upper_2sps[j]<- mean(na.omit(ci_r_upper_2sps))
+      ci_upper_2sri[j]<- mean(na.omit(ci_r_upper_2sri))
+      
+      
+      # cov_2sri[j]<- (sum((na.omit(ci_2sri_lower)<=  exp(-0.9))&(na.omit(ci_2sri_upper) >= exp(-0.9))))
+      # 
+      # cov_2sps[j]<- (sum((na.omit(ci_2sps_lower)<= exp(-0.9))&(na.omit(ci_2sps_upper) >=  exp(-0.9))))
+      
+      #cov_glm[j]<- (sum((na.omit(ci_s_bias_lower)<=  exp(-0.9))&(na.omit(ci_s_bias_upper) >=  exp(-0.9))))
+      ###  cluster robust     
+      cov_r_2sri[j]<- (sum((na.omit(ci_r_lower_2sri)<=  exp(-0.9))&(na.omit(ci_r_upper_2sri) >= exp(-0.9))))
+      
+      cov_r_2sps[j]<- (sum((na.omit(ci_r_lower_2sps)<= exp(-0.9))&(na.omit(ci_r_upper_2sps) >=  exp(-0.9))))
+      
+      cov_r_glm[j]<- (sum((na.omit(ci_r_lower_glm)<=  exp(-0.9))&(na.omit(ci_r_upper_glm) >=  exp(-0.9))))
+      
+      power_2sps[j]<- sum((na.omit(p_2sps_1)<0.05))
+      power_2sri[j]<- sum(na.omit(p_2sri_1)<0.05)
+      power_glm[j]<- sum(na.omit(p_glm_1)<0.05)
+      p_2sps[j]<- mean((na.omit(p_2sps_1)))
+      p_2sri[j]<- mean(na.omit(p_2sri_1))
+      p_glm[j]<- mean(na.omit(p_glm_1))
+      
+      
+      glm_sd[j]<- mean(na.omit(sd_glm))
+      #glm_sd_r[j]<-mean(na.omit(sd_glm_r))
+      sri_sd[j]<- mean(na.omit(sd_2sri))
+      #sri_sd_r[j]<- mean(na.omit(sd_2sri_r))
+      sps_sd[j]<- mean(na.omit(sd_2sps))
+      sps_sd_r[j]<- mean(na.omit(sd_2sps_r))
+      
+      iv_strength[j]<-mean(na.omit(w_iv))
+      AUC[j]<- mean(na.omit(auc))
+      para[j]=gamma2
+      gamma2=gamma2+0.1
+      
+      
+    }
+    
+    #df<- data.frame(cnt,para,pc_1,wc_1,wc_0,glm_sd,glm_sd_r,sps_sd,sps_sd_r,sri_sd,sri_sd_r, coef_2sps,coef_2sri,unbiased_OR,biased_OR,iv_strength,cov_2sps,cov_2sri,cov_r_glm,cov_r_2sps,cov_r_2sri,p_2sps,p_2sri,p_glm,power_2sps,power_2sri,power_glm)
+    df<- data.frame(cnt,para,pc_1,wc_1,wc_0, coef_2sps,coef_2sri,unbiased_OR,biased_OR,iv_strength,AUC,sps_sd,sri_sd,glm_sd,ci_lower_glm,ci_upper_glm,  ci_lower_2sps,ci_upper_2sps,ci_lower_2sri,ci_upper_2sri)
+    
+    
+    df<- df %>% mutate(per_bias_2sps=abs((exp(-0.9)-coef_2sps)/abs(exp(-0.9))))%>% mutate(per_bias_2sri=abs((exp(-0.9)-coef_2sri)/abs(exp(-0.9))))
+    df<- df %>% mutate(per_bias_glm=abs((exp(-0.9)-biased_OR)/abs(exp(-0.9))))
+    df<- df %>% mutate(cov_r_2sps= round(cov_r_2sps/cnt,4))%>% mutate(cov_r_2sri= round(cov_r_2sri/cnt,4))%>% mutate(cov_r_glm= round(cov_r_glm/cnt,4))
+    #df<- df %>% mutate(power_2sri= round(p_2sri/cnt,4))
+    # df<- df %>% mutate(power_2sps= round(p_2sps/cnt,4))
+    # df<- df %>% mutate(power_glm= round(p_glm/cnt,4))
+    
+    return(df)
+    
+  }
+tt<- my_simulation_2stage_simple(0,1)
+tt_2<- my_simulation_2stage_simple(0,2)
+tt_3<- my_simulation_2stage_simple(0,3)
+tt_4<- my_simulation_2stage_simple(0,4)
+  
+## Figure 13 in chapter 8
+test<-  rbind(tt,tt_2,tt_3,tt_4)
+test<- test %>% subset(select=c("para","per_bias_glm","per_bias_2sri", "per_bias_2sps","id"))
+data_m<- melt(test, id.var=c("para","id"))
+data_m$variable<- ifelse(data_m$variable=='per_bias_glm','GLM',ifelse(data_m$variable=='per_bias_2sri','2SRI','2SPS'))
+names(data_m)[names(data_m)=='variable']<-'Estimation method'
+ggplot(data=data_m,aes(x=para, y=value*100,color=`Estimation method`))+ geom_line(size=0.5)+geom_point()+ ylab("percent bias %")+xlab(~paste(gamma[2],"(unmeasured confounding level)"))+ylim(0,100)+labs(subtitle="GLM estimates vs. 2SPS, 2SRI estimates,using Pearson residual") + theme(legend.position = "bottom")+ facet_wrap(~ id, nrow = 2)
+  
+## Figure 14 in chapter 8
+  
+test<-  rbind(tt,tt_2,tt_3,tt_4)
+test<- test %>% subset(select=c("para","cov_r_2sps","cov_r_2sri", "cov_r_glm","id"))
+data_r<- melt(test, id.var=c("para","id"))
+data_r$variable<- ifelse(data_r$variable=='cov_r_glm','GLM',ifelse(data_r$variable=='cov_r_2sri','2SRI','2SPS'))
+names(data_r)[names(data_r)=='variable']<-'Estimation method'
+cov_plot<-  ggplot(data=data_r,aes(x=para, y=value*100,color=`Estimation method`))+ geom_line(size=0.5)+geom_point()+ ylab("coverage rate %")+xlab(~paste(gamma[3],"(unmeasured confounding level)"))+ylim(0,100)+labs(subtitle=" Covarage rates from GLM,2SPS and 2SRI estimates using Pearson residual") + theme(legend.position = "bottom")+ facet_wrap(~ id, nrow = 2)+
+geom_hline(yintercept=95,color='red',linetype='dashed')
+
+### research question 2 
+
+simulation_q2<- function( gamma2,n){
+    ## define the value of PPP
+    set.seed(324)
+    ## define the value of PPP 
+    ppp_10<- c(0,1)
+    ppp_10<- sample(ppp_10,cnt_phy,replace=TRUE,prob=c(0.3,0.7))
+    ppp_10<- rep(ppp_10,times=n.pp)
+    
+    
+    # define the variables that store the values 
+    coef_2sps<- c(rep(NA,20))
+    coef_2sri<- c(rep(NA,20))
+    
+    iv_strength<- c(rep(NA,20))
+    cov_2sri<- c(rep(NA,20))
+    cov_2sps<- c(rep(NA,20))
+    cov_glm<-c(rep(NA,20))
+    cnt<- c(rep(NA,20))
+    
+    cov_r_2sri<- c(rep(NA,20))
+    cov_r_2sps<- c(rep(NA,20))
+    cov_r_glm<- c(rep(NA,20))
+    glm_sd<- c(rep(NA,20))
+    glm_sd_r<- c(rep(NA,20))
+    sri_sd<- c(rep(NA,20))
+    sri_sd_r<- c(rep(NA,20))
+    sps_sd<- c(rep(NA,20))
+    sps_sd_r<- c(rep(NA,20))
+    p_2sps<-c(rep(NA,20))
+    p_2sri<- c(rep(NA,20))
+    p_glm<- c(rep(NA,20))
+    power_2sps<- c(rep(NA,20))
+    power_2sri<- c(rep(NA,20))
+    power_glm<- c(rep(NA,20))
+    
+    unbiased_OR<- c(rep(NA,20))
+    biased_OR<- c(rep(NA,20))
+    para<-c(rep(NA,20))
+    pc_1<-  c(rep(NA,20))
+    wc_1<- c(rep(NA,20))
+    wc_0<- c(rep(NA,20))
+    ci_lower_glm<- c(rep(NA,20))
+    ci_lower_2sps<- c(rep(NA,20))
+    ci_lower_2sri<- c(rep(NA,20))
+    ci_upper_glm<- c(rep(NA,20))
+    ci_upper_2sps<- c(rep(NA,20))
+    ci_upper_2sri<- c(rep(NA,20))
+    AUC<- c(rep(NA,20))
+    
+    for ( j in 1:20){
+      n_1=0
+      s_2sps<-c(rep(NA,sim))
+      s_2sri<-c(rep(NA,sim))
+      bias_OR<-c(rep(NA,sim))
+      ci_2sri_lower<-  c(rep(NA,sim))
+      ci_2sri_upper<-  c(rep(NA,sim))
+      ci_s_bias_lower<-  c(rep(NA,sim))
+      ci_s_bias_upper<-  c(rep(NA,sim))
+      ci_2sps_lower<-  c(rep(NA,sim))
+      ci_2sps_upper<-  c(rep(NA,sim))
+      w_iv<- c(rep(NA,sim)) # iv strength 
+      p_2sri_1<- c(rep(NA,sim))
+      p_2sps_1<- c(rep(NA,sim))
+      p_glm_1<- c(rep(NA,sim))
+      
+      ci_r_lower_glm<- c(rep(NA,sim))
+      ci_r_lower_2sps<- c(rep(NA,sim))
+      ci_r_lower_2sri<- c(rep(NA,sim))
+      ci_r_upper_glm<- c(rep(NA,sim))
+      ci_r_upper_2sps<- c(rep(NA,sim))
+      ci_r_upper_2sri<- c(rep(NA,sim))
+      sd_glm<- c(rep(NA,sim))
+      sd_glm_r<- c(rep(NA,sim))
+      sd_2sri<- c(rep(NA,sim))
+      sd_2sri_r<- c(rep(NA,sim))
+      sd_2sps<- c(rep(NA,sim))
+      sd_2sps_r<- c(rep(NA,sim))
+      
+      true_OR<- c(rep(NA,sim))
+      pc<-c(rep(NA,sim))
+      wc1<-c(rep(NA,sim))
+      wc0<-c(rep(NA,sim))
+      aud<-c (rep(NA,sim))
+      
+      
+      for( i in 1: sim){
+        
+        gender <- rbinom(sum(n.pp), 1, 0.6)# gender
+        dosage<- rnorm(sum(n.pp),13,2)
+        un<- rnorm(sum(n.pp), 1,2)  ## unmeasured covariates
+        #x2<- rnorm(sum(n.pp),20,2)
+        x2<- rnorm(sum(n.pp),10,1)
+        ##x2<- rnorm(sum(n.pp),1,0.5)
+        # x2<- rbinom(sum(n.pp),1,0.5)
+        x<- 4*ppp_10+0.2*dosage+ 0.53*gender-3.5+1.1*un+0*x2
+        ptxA= exp(x)/(1+exp(x))
+        txA <- rbinom(sum(n.pp), 1,ptxA)### ppp and exposure....
+        y<- -0.9*txA-0.02*dosage-0.6*gender-1*un +gamma2*x2#  gamma2 controls the strength of unmeasured confounder
+        pout <- exp(y)/(1+exp(y))
+        out <- rbinom(sum(n.pp), 1,pout)
+        data<- as.data.frame(cbind(phyId,patId, txA,out, gender,ppp_10,dosage, un,x2))
+        data<-data %>% group_by(phyId) %>% mutate(ppp= roll_sum(lag(txA),n,fill = NA,align = "right"))
+        data<- as.data.frame(data)
+        s1<- summary(lm(un~ppp,data=data))
+        s2<- summary(lm(txA~ppp,data=data))
+        s3<- summary(lm(out~ppp,data=subset(data,txA==0)))
+        s3_1<- summary(lm(out~ppp,data=subset(data,txA==1)))
+        s4<- summary(lm(un~out,data=data))
+        p_un<- s1$coefficients[2,4]
+        p_x<-s2$coefficients[2,4]
+        p_y<-s3$coefficients[2,4]
+        p_y_1<-s3_1$coefficients[2,4]
+        
+        
+        if ( p_x<0.05) ## 1. iv not associated with unmeasured confounder; iv does not impact the outcome directly; 
+          
+        {
+          data_c<- data %>% subset(txA==ppp)
+          pc[i]<- nrow(data_c)/nrow(data)
+          wc1[i]=nrow(subset(data_c,out==1&txA==1))/nrow(data_c)
+          wc0[i]=nrow(subset(data_c,out==1&txA==0))/nrow(data_c)
+          fit_iv<- ivreg(out~txA+gender+dosage+x2+un|ppp+gender+dosage+x2+un,data=data)
+          ci_iv<- confint(fit_iv)
+          # summary(fit_iv,diagnostic=TRUE)
+          s_iv<- summary(fit_iv,diagnostic=TRUE)
+          w_iv[i]<- s_iv$diagnostics[1,3]## IV strength(F-statistics)
+          
+          ##adjusted measured covariates  using GLM 
+          data_n<- na.omit(data)
+          
+          mod<- glm(txA~ppp+dosage+gender+un+x2,data=data_n,family = binomial("logit"))
+          predictions <- predict(mod, type = "response")
+          r<-suppressMessages(roc(data_n$txA,predictions))
+          
+          s_OR<- glm(out~txA+gender+dosage+un+x2, data=data,family = "binomial")
+          
+          true_OR[i]<- exp(s_OR$coefficients[2])
+          s_bias<- glm(out~txA+gender+dosage+x2, data=data,family = "binomial")
+          bias_OR[i]<- exp(s_bias$coefficients[2])
+          ci_r_glm<- coef(summary(s_bias))[2, "Std. Error"] 
+          s_glm<- summary(s_bias)
+          ci_r_lower_glm[i]<-exp(ci_robust(s_glm,ci_r_glm)[1])
+          ci_r_upper_glm[i]<-exp(ci_robust(s_glm,ci_r_glm)[2])
+          sd_glm[i]<-exp(s_glm$coef[2,2])
+          p_glm_1[i]<-coef(summary(s_bias))[2, "Pr(>|z|)"]
+          
+          s1<- glm(txA~ppp+dosage+gender+x2,data=na.omit(data),family = "binomial")
+          
+          phat<- predict(s1)
+          s2.2sps<- glm(out~phat+dosage+gender+x2,data=na.omit(data),family = "binomial")
+          
+          s_2sps_1<- summary(s2.2sps)
+          data_1<- na.omit(data)
+          ci_r_2sps<- coef(summary(s2.2sps))[2, "Std. Error"] 
+          ci_r_lower_2sps[i]<-exp(ci_robust(s_2sps_1,ci_r_2sps)[1])
+          ci_r_upper_2sps[i]<- exp(ci_robust(s_2sps_1,ci_r_2sps)[2])
+          p_2sps_1[i]<- coef(summary(s_bias))[2, "Pr(>|z|)"]
+          
+          s_2sps[i]<- exp(s_2sps_1$coefficients[2,1])
+          sd_2sps[i]<- exp(s_2sps_1$coefficients[2])
+          
+          ##2SRI
+          r<- residuals.glm(s1,type="pearson")
+          s2.2sri<- glm(out~txA+residuals.glm(s1,type="pearson")+gender+dosage+x2,data=na.omit(data),family = "binomial")
+          s_2sri_1<- summary(s2.2sri)
+          s_2sri[i]<- exp(s_2sri_1$coefficients[2,1])
+          
+          ci_r_2sri<- coef(summary(s2.2sri))[2, "Std. Error"] 
+          ci_r_lower_2sri[i]<-exp(ci_robust(s_2sri_1,ci_r_2sri)[1])
+          ci_r_upper_2sri[i]<-exp(ci_robust(s_2sri_1,ci_r_2sri)[2])
+          sd_2sri[i]<- exp(s_2sri_1$coefficients[2,2])
+          
+          p_2sri_1[i]<- coef(summary(s2.2sri))[2, "Pr(>|z|)"]
+          
+          
+          n_1=n_1+1
+          
+          
+        }else{
+          NULL
+        }
+        
+      }
+      cnt[j]<-n_1 ## count valid iv
+      pc_1[j]<- mean(na.omit(pc))
+      wc_1[j]<- mean(na.omit(wc1))
+      wc_0[j]<- mean(na.omit(wc0))
+      
+      unbiased_OR[j]<- mean(na.omit(true_OR))
+      coef_2sps[j]<- mean(na.omit(s_2sps))
+      coef_2sri[j]<- mean(na.omit(s_2sri))
+      biased_OR[j]<- mean(na.omit(bias_OR))
+      
+      ci_lower_glm[j]<- mean(na.omit( ci_r_lower_glm))
+      ci_lower_2sps[j]<- mean(na.omit(ci_r_lower_2sps))
+      ci_lower_2sri[j]<- mean(na.omit(ci_r_lower_2sri))
+      ci_upper_glm[j]<- mean(na.omit(ci_r_upper_glm))
+      ci_upper_2sps[j]<- mean(na.omit(ci_r_upper_2sps))
+      ci_upper_2sri[j]<- mean(na.omit(ci_r_upper_2sri))
+      
+      cov_r_2sri[j]<- (sum((na.omit(ci_r_lower_2sri)<=  exp(-0.9))&(na.omit(ci_r_upper_2sri) >= exp(-0.9))))
+      cov_r_2sps[j]<- (sum((na.omit(ci_r_lower_2sps)<= exp(-0.9))&(na.omit(ci_r_upper_2sps) >=  exp(-0.9))))
+      cov_r_glm[j]<- (sum((na.omit(ci_r_lower_glm)<=  exp(-0.9))&(na.omit(ci_r_upper_glm) >=  exp(-0.9))))
+      power_2sps[j]<- sum((na.omit(p_2sps_1)<0.05))
+      power_2sri[j]<- sum(na.omit(p_2sri_1)<0.05)
+      power_glm[j]<- sum(na.omit(p_glm_1)<0.05)
+      p_2sps[j]<- mean((na.omit(p_2sps_1)))
+      p_2sri[j]<- mean(na.omit(p_2sri_1))
+      p_glm[j]<- mean(na.omit(p_glm_1))
+      
+      
+      glm_sd[j]<- mean(na.omit(sd_glm))
+      #glm_sd_r[j]<-mean(na.omit(sd_glm_r))
+      sri_sd[j]<- mean(na.omit(sd_2sri))
+      #sri_sd_r[j]<- mean(na.omit(sd_2sri_r))
+      sps_sd[j]<- mean(na.omit(sd_2sps))
+      sps_sd_r[j]<- mean(na.omit(sd_2sps_r))
+      
+      iv_strength[j]<-mean(na.omit(w_iv))
+      AUC[j]<- mean(na.omit(auc))
+      para[j]=gamma2
+      gamma2=gamma2+0.05
+      
+      
+    }
+    
+    df<- data.frame(cnt,para,pc_1,wc_1,wc_0, coef_2sps,coef_2sri,unbiased_OR,biased_OR,iv_strength,AUC,sps_sd,sri_sd,glm_sd,ci_lower_glm,ci_upper_glm,  ci_lower_2sps,ci_upper_2sps,ci_lower_2sri,ci_upper_2sri)
+    df<- df %>% mutate(per_bias_2sps=abs((exp(-0.9)-coef_2sps)/abs(exp(-0.9))))%>% mutate(per_bias_2sri=abs((exp(-0.9)-coef_2sri)/abs(exp(-0.9))))
+    df<- df %>% mutate(per_bias_glm=abs((exp(-0.9)-biased_OR)/abs(exp(-0.9))))
+    df<- df %>% mutate(cov_r_2sps= round(cov_r_2sps/cnt,4))%>% mutate(cov_r_2sri= round(cov_r_2sri/cnt,4))%>% mutate(cov_r_glm= round(cov_r_glm/cnt,4))
+    
+    return(df)
+    
+  }
+### gamma2=1.0
+test_con_1_<- simulation_q2(0,1)
+test_con_2_<- simulation_q2(0,2)
+test_con_3_<- simulation_q2(0,3)
+test_con_4_<- simulation_q2(0,4)
+### gamma 2 equals 1.5 
+test_con1<- simulation_q2(0,1)
+test_con2<- simulation_q2(0,2)
+test_con3<- simulation_q2(0,3)
+test_con4<- simulation_q2(0,4)
+### Figure 15 in chapter 8
+test<- rbind(test_con_1_,test_con_2_,test_con_3_,test_con_4_)
+test<- test %>% subset(select=c("para","per_bias_glm","per_bias_2sri", "per_bias_2sps","id"))
+data_m_1<- melt(test,id.var=c("para","id"))
+data_m_1$value<-ifelse(data_m_1$value>3,Inf,data_m_1$value)
+data_m_1$variable<- ifelse(data_m_1$variable=='per_bias_glm','GLM',ifelse(data_m_1$variable=='per_bias_2sri','2SRI','2SPS'))
+names(data_m_1)[names(data_m_1)=='variable']='Estimation method'
+bias_plot_1<-  ggplot(data=data_m_1,aes(x=para, y=value*100,color=`Estimation method`))+ geom_line(size=0.5)+geom_point()+ ylab("Percent bias (a) %")+xlab(~paste(gamma[3],"(noncollapsibility effect level)"))+ylim(0,300)+labs(subtitle=~paste(gamma[2],'=1.0')) + theme(legend.position = "bottom")+ facet_wrap(~ id, nrow = 2)
+test<- rbind(test_con1,test_con2,test_con3,test_con4)
+test_m<- test %>% subset(select=c("para","per_bias_glm","per_bias_2sri", "per_bias_2sps","id"))
+data_m_2<- melt(test_m,id.var=c("para","id"))
+data_m_2$value<-ifelse(data_m_2$value>3,Inf,data_m_2$value)
+data_m_2$variable<- ifelse(data_m_2$variable=='per_bias_glm','GLM',ifelse(data_m_2$variable=='per_bias_2sri','2SRI','2SPS'))
+names(data_m_2)[names(data_m_2)=='variable']='Estimation method'
+bias_plot_2<-  ggplot(data=data_m_2,aes(x=para, y=value*100,color=`Estimation method`))+ geom_line(size=0.5)+geom_point()+ ylab("Percent bias (b) %")+xlab(~paste(gamma[3],"(noncollapsibility effect level)"))+ylim(0,300)+labs(subtitle=~paste(gamma[2],'=1.5')) + theme(legend.position = "bottom")+ facet_wrap(~ id, nrow = 2)
+ggarrange(bias_plot_1,bias_plot_2,common.legend = TRUE,legend = 'bottom')
+
+test<- rbind(test_con_1_,test_con_2_,test_con_3_,test_con_4_)
+test_c<- test %>% subset(select=c("para","cov_r_2sps","cov_r_2sri", "cov_r_glm","id"))
+data_c_1<- melt(test_c,id.var=c("para","id"))
+data_c_1$variable<- ifelse(data_c_1$variable=='cov_r_glm','GLM',ifelse(data_c_1$variable=='cov_r_2sri','2SRI','2SPS'))
+names(data_c_1)[names(data_c_1)=='variable']='Estimation method'
+  
+## Figure 16 in chapter 8
+cov_plot_1<-  ggplot(data=data_c_1,aes(x=para, y=value*100,color=`Estimation method`))+ geom_line(size=0.5)+geom_point()+ ylab("Converage rate (a) %")+xlab(~paste(gamma[3],"(noncollapsibility effect level)"))+ylim(0,100)+labs(subtitle=~paste(gamma[2],'=1.0')) + theme(legend.position = "bottom")+ facet_wrap(~ id, nrow = 2)+
+geom_hline(yintercept=95,color='red',linetype='dashed')
+test<- rbind(test_con1,test_con2,test_con3,test_con4)
+test_c<- test %>% subset(select=c("para","cov_r_2sps","cov_r_2sri", "cov_r_glm","id"))
+data_c_2<- melt(test_c,id.var=c("para","id"))
+data_c_2$variable<- ifelse(data_c_2$variable=='cov_r_glm','GLM',ifelse(data_c_2$variable=='cov_r_2sri','2SRI','2SPS'))
+names(data_c_2)[names(data_c_2)=='variable']='Estimation method'
+cov_plot_2<-  ggplot(data=data_c_2,aes(x=para, y=value*100,color=`Estimation method`))+ geom_line(size=0.5)+geom_point()+ ylab("Converage rate (b) %")+xlab(~paste(gamma[3],"(noncollapsibility effect level)"))+ylim(0,100)+labs(subtitle=~paste(gamma[2],'=1.5')) + theme(legend.position = "bottom")+ facet_wrap(~ id, nrow = 2)+
+geom_hline(yintercept=95,color='red',linetype='dashed')
+ggarrange(cov_plot_1,cov_plot_2,common.legend = TRUE,legend = 'bottom')
+  
+### Model 1 in table 21
+test_colla_1<-  function(df){
+    
+    fit_un<- glm(hosp~txA,data=df,family = binomial("logit"))
+    
+    OR_UN<-(summary(fit_un)$coef[2])
+    fit_glm<- glm(hosp~txA+cci_hosp,data=df,family=binomial("logit"))
+    
+    OR_AJ<-(summary(fit_glm)$coef[2])  ## 0.4563
+    ps<- glm(txA~cci_hosp, family=binomial("logit"),data=df)
+    p<- glm(txA~1, family=binomial("logit"),data=df)
+    
+    df$psvalue<- predict(ps,type="response")
+    df$psvalue_1<- predict(p,type='response')
+    df$weights<- ifelse(df$txA==1,df$psvalue_1/df$psvalue,(1-df$psvalue_1)/(1-df$psvalue))
+    
+    fit_glm_ip<- glm(hosp~txA,weights=weights,data=df,family=binomial("logit"))
+    
+    OR_IP<-(summary(fit_glm_ip)$coef[2])  ## 0.4563
+    
+    fit_iv<- glm(txA~ppp_p+cci_hosp,data=df,family = binomial('logit'))
+    
+    r1<- residuals.glm(fit_iv,type='pearson')
+    
+    fit_2ri<- glm(hosp~txA+cci_hosp+r1,data=df,family = binomial("logit"))
+    
+    OR_2RI<- (summary(fit_2ri)$coef[2])  ## 0.4563
+    
+    r<- cbind(OR_UN,OR_AJ,OR_IP,OR_2RI,summary(fit_2ri)$coefficients[2,4])
+    
+    return(r)
+  }
+## Model 2 in table 21
+test_colla_2<-  function(df){
+    
+    df$year<-as.numeric(df$year)
+    
+    fit_un<- glm(hosp~txA,data=df,family = binomial("logit"))
+    
+    OR_UN<-(summary(fit_un)$coef[2])
+    fit_glm<- glm(hosp~txA+year,data=df,family=binomial("logit"))
+    
+    OR_AJ<-(summary(fit_glm)$coef[2])  ## 0.4563
+    ps<- glm(txA~year, family=binomial("logit"),data=df)
+    p<- glm(txA~1, family=binomial("logit"),data=df)
+    
+    df$psvalue<- predict(ps,type="response")
+    df$psvalue_1<- predict(p,type='response')
+    df$weights<- ifelse(df$txA==1,df$psvalue_1/df$psvalue,(1-df$psvalue_1)/(1-df$psvalue))
+    
+    fit_glm_ip<- glm(hosp~txA,weights=weights,data=df,family=binomial("logit"))
+    
+    OR_IP<-(summary(fit_glm_ip)$coef[2])  ## 0.4563
+    
+    fit_iv<- glm(txA~ppp_p+year,data=df,family = binomial('logit'))
+    
+    r1<- residuals.glm(fit_iv,type='pearson')
+    
+    fit_2ri<- glm(hosp~txA+year+r1,data=df,family = binomial("logit"))
+    
+    OR_2RI<- (summary(fit_2ri)$coef[2])  ## 0.4563
+    
+    r<- cbind(OR_UN,OR_AJ,OR_IP,OR_2RI,summary(fit_2ri)$coefficients[2,4])
+    
+    return(r)
+  }
+test_colla(df)
+### Model 3 in table 21
+test_colla_3<-  function(df){
+    
+    df$year<-as.numeric(df$year)
+    fit_un<- glm(hosp~txA+year,data=df,family = binomial("logit"))
+    
+    OR_UN<-(summary(fit_un)$coef[2])
+    fit_glm<- glm(hosp~txA+year+cci_hosp,data=df,family=binomial("logit"))
+    
+    OR_AJ<-(summary(fit_glm)$coef[2])  ## 0.4563
+    ps<- glm(txA~year+cci_hosp, family=binomial("logit"),data=df)
+    p<- glm(txA~1, family=binomial("logit"),data=df)
+    
+    df$psvalue<- predict(ps,type="response")
+    df$psvalue_1<- predict(p,type='response')
+    df$weights<- ifelse(df$txA==1,df$psvalue_1/df$psvalue,(1-df$psvalue_1)/(1-df$psvalue))
+    
+    fit_glm_ip<- glm(hosp~txA,weights=weights,data=df,family=binomial("logit"))
+    
+    OR_IP<-(summary(fit_glm_ip)$coef[2])  ## 0.4563
+    
+    fit_iv<- glm(txA~ppp_p+year+cci_hosp,data=df,family = binomial('logit'))
+    
+    r1<- residuals.glm(fit_iv,type='pearson')
+    
+    fit_2ri<- glm(hosp~txA+year+cci_hosp+r1,data=df,family = binomial("logit"))
+    
+    OR_2RI<- (summary(fit_2ri)$coef[2])  ## 0.4563
+    
+    r<- cbind(OR_UN,OR_AJ,OR_IP,OR_2RI,summary(fit_2ri)$coefficients[2,4])
+    
+    return(r)
+  }
+test_colla(df)
