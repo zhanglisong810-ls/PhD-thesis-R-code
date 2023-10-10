@@ -2054,7 +2054,7 @@ ppp_1$cci<-  as.factor(ppp_1$cci)
 install.packages("lpSolveAPI")
 library(lpSolveAPI)
 
-summary(ppp_1$pp)
+
 args <- ivmte(data = ppp_1[,c('age','gender','bmi','baseline_hba1c','drug','ppp','follow_hba1c','ethnic','cci')],
               ivlike = follow_hba1c~ drug +factor(ppp)+drug*factor(ppp),
               target = "late",
@@ -2065,14 +2065,13 @@ args <- ivmte(data = ppp_1[,c('age','gender','bmi','baseline_hba1c','drug','ppp'
               propensity = drug ~ factor(ppp)+age+gender+ethnic+bmi+cci,bootstraps=1000)
 summary(args)
 
-args <- ivmte(data = ppp_1[,c('age','gender','bmi','baseline_hba1c','drug','pp','follow_hba1c','ethnic')],
-              ivlike = ( baseline_hba1c )~ drug +pp,
+args <- ivmte(data = ppp_1[,c('age','gender','bmi','baseline_hba1c','drug','ppp','follow_hba1c','ethnic','cci')],
+              ivlike = follow_hba1c~ drug +factor(ppp)+drug*factor(ppp),
               target = "ate",
               m0 = ~ u,
               m1 = ~ u,
-              propensity = drug ~ pp+gender+age+bmi+ethnic,bootstraps=50)
+              propensity = drug ~ factor(ppp)+age+gender+ethnic+bmi+cci,bootstraps=1000)
 summary(args)
-
 
 ### Logistic regression results for the binary outcomes,Table 16 in Chapter 6
 
